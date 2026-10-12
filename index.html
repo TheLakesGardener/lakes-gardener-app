@@ -428,7 +428,7 @@ function openApptForm(p){
   const cid=o?o.customerId:(p.customerId||custs[0].id),c=S.customers[cid]||{};
   const date=o?o.date:(p.date||todayStr()),start=o?o.start:(c.startTime||''),dur=o?o.duration:(c.duration||60);
   openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}">${head(o?'Reschedule visit':'Schedule a visit')}
-  <label class="f">Customer<select name="customerId"${o?' disabled':''}>${custs.map(x=>`<option value="${esc(x.id)}"${x.id===cid?' selected':''}>${esc(x.name)}${x.status==='paused'?' (paused)':''}</option>`).join('')}</select></label>
+  <label class="f">Customer</label>${custPick('customerId',cid,'',!!o)}
   <label class="f">Date<input type="date" name="date" required value="${esc(date)}"></label>
   <div class="row2"><label class="f">Start <span class="hint">optional</span><input type="time" name="start" value="${esc(start)}"></label><label class="f">Length (mins)<input type="number" name="duration" min="15" step="15" inputmode="numeric" value="${esc(dur)}"></label></div>
   <label class="f">Note for this visit<textarea name="notes" rows="2">${esc(o&&o.notes||'')}</textarea></label>
@@ -468,15 +468,18 @@ function viewCustomers(){
   if(!S.ready)return `<p class="muted">Loading…</p>`;
   const n=Object.keys(S.customers).length;
   return `<div class="bar"><h2 class="page-title">Customers</h2><button class="btn small primary" data-action="new-customer">Add customer</button></div>
-  ${n>5?`<input id="custSearch" type="search" placeholder="Search by name or address" aria-label="Search customers">`:''}
+  ${n>5?`<input id="custSearch" type="search" placeholder="Search all customers, including paused" aria-label="Search customers">`:''}
   <div id="custList">${custListHtml('')}</div>`;
 }
 function custListHtml(q){
   q=q.trim().toLowerCase();
-  const list=sortedCustomers().filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.address||'').toLowerCase().includes(q));
+  const all=sortedCustomers().filter(c=>!q||(c.name||'').toLowerCase().includes(q)||(c.address||'').toLowerCase().includes(q));
+  const nPaused=all.filter(c=>!isActive(c)).length;
+  const list=q||S.showPaused?all:all.filter(isActive);
+  const toggle=!q&&nPaused?`<button class="btn small" style="margin-top:14px" data-action="toggle-paused">${S.showPaused?'Hide paused customers':`Show ${nPaused} paused customer${nPaused===1?'':'s'}`}</button>`:'';
   if(!Object.keys(S.customers).length)return `<p class="muted" style="margin-top:16px">No customers yet.</p>`;
-  if(!list.length)return `<p class="muted" style="margin-top:16px">No customers match that search.</p>`;
-  return list.map(c=>`<button class="item" data-action="edit-customer" data-id="${esc(c.id)}"><span class="item-main"><strong>${esc(c.name)}</strong><span class="item-sub">${patternLabel(c)}, ${pricingLabel(c)}</span></span><span class="item-end">${c.status==='paused'?'<span class="badge">Paused</span>':''}</span></button>`).join('');
+  if(!list.length)return (q?`<p class="muted" style="margin-top:16px">No customers match that search.</p>`:`<p class="muted" style="margin-top:16px">No active customers.</p>`)+toggle;
+  return list.map(c=>`<button class="item" data-action="edit-customer" data-id="${esc(c.id)}"><span class="item-main"><strong>${esc(c.name)}</strong><span class="item-sub">${patternLabel(c)}, ${pricingLabel(c)}</span></span><span class="item-end">${c.status==='paused'?'<span class="badge">Paused</span>':''}</span></button>`).join('')+toggle;
 }
 
 function viewInvoice(){
@@ -488,7 +491,7 @@ function viewInvoice(){
   const I=S.inv;
   if(!I.customerId||!S.customers[I.customerId]){
     const w=custs.find(c=>S.visits.some(v=>v.customerId===c.id&&!v.invoiced));
-    I.customerId=(w||custs[0]).id;I.from=null;I.to=null;I.excluded=new Set();I.extras=[];I.month=null;
+    I.customerId=(w||custs.find(isActive)||custs[0]).id;I.from=null;I.to=null;I.excluded=new Set();I.extras=[];I.month=null;
   }
   const c=S.customers[I.customerId];
   const thisMonth=todayStr().slice(0,7);
@@ -504,9 +507,9 @@ function viewInvoice(){
   const visits=S.visits.filter(v=>v.customerId===c.id&&v.date>=I.from&&v.date<=I.to&&(I.showInvoiced||!v.invoiced)).sort((a,b)=>a.date.localeCompare(b.date));
   const chosen=visits.filter(v=>!I.excluded.has(v.id));
   if(c.pricing==='monthly'){I.text='';return `<h2 class="page-title">Invoices</h2>${segs}<p class="muted">Completed visits that haven’t been invoiced are gathered here for each customer.</p>${readyHtml}
-  <label class="f">Customer<select data-change="inv-customer">${custs.map(x=>`<option value="${esc(x.id)}"${x.id===c.id?' selected':''}>${esc(x.name)}${x.pricing==='monthly'?' (monthly)':''}</option>`).join('')}</select></label>${contractSectionHtml(c)}`;}
+  <label class="f">Customer</label>${custPick('',c.id,'inv-customer')}${contractSectionHtml(c)}`;}
   let h=`<h2 class="page-title">Invoices</h2>${segs}<p class="muted">Completed visits that haven’t been invoiced are gathered here for each customer.</p>${readyHtml}
-  <label class="f">Customer<select data-change="inv-customer">${custs.map(x=>`<option value="${esc(x.id)}"${x.id===c.id?' selected':''}>${esc(x.name)}${x.pricing==='monthly'?' (monthly)':''}</option>`).join('')}</select></label>
+  <label class="f">Customer</label>${custPick('',c.id,'inv-customer')}
   <div class="row2"><label class="f">From<input type="date" data-change="inv-from" value="${I.from}"></label><label class="f">To<input type="date" data-change="inv-to" value="${I.to}"></label></div>
   <label class="check"><input type="checkbox" data-change="inv-show"${I.showInvoiced?' checked':''}> Include visits already invoiced</label>`;
   if(!visits.length){I.text='';return h+`<p class="muted" style="margin-top:18px">No visits to bill between these dates.</p>`;}
@@ -823,7 +826,7 @@ function openVisitForm(o){
   const ex=o.id?S.visits.find(v=>v.id===o.id):null;
   let v;
   if(ex)v=clone(ex);
-  else{const c=S.customers[o.customerId]||custs[0];
+  else{const c=S.customers[o.customerId]||custs.find(isActive)||custs[0];
     v={customerId:c.id,date:o.date||todayStr(),start:o.start||'',end:o.end||'',minutes:o.start&&o.end?minsBetween(o.start,o.end):'',
       tasks:(c.tasks||[]).slice(),materials:[],labourType:ltFor(c),
       rate:c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate,fixedPrice:c.price??'',notes:'',invoiced:false,scheduledKey:o.scheduledKey||''};}
@@ -831,7 +834,7 @@ function openVisitForm(o){
   const isContract=S.customers[v.customerId]?.pricing==='monthly'||lt==='contract';
   const known=uniq([...(S.settings.tasks||[]),...(S.customers[v.customerId]?.tasks||[]),...(v.tasks||[])]);
   openSheet(`<form id="visitForm" data-id="${esc(ex?ex.id:'')}" data-timer="${o.fromTimer?'1':''}" data-lt="${lt}">${head(ex?'Edit visit':'Log a visit')}<input type="hidden" name="scheduledKey" value="${esc(v.scheduledKey||'')}">
-  <label class="f">Customer<select name="customerId" data-change="vf-customer"${ex?'':''}>${custs.map(c=>`<option value="${esc(c.id)}"${c.id===v.customerId?' selected':''}>${esc(c.name)}${c.status==='paused'?' (paused)':''}</option>`).join('')}</select></label>
+  <label class="f">Customer</label>${custPick('customerId',v.customerId,'vf-customer')}
   <label class="f">Date<input type="date" name="date" required value="${esc(v.date)}"></label>
   <div class="row3"><label class="f">Start<input type="time" name="start" value="${esc(v.start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(v.end)}"></label><label class="f">Minutes<input type="number" name="minutes" inputmode="numeric" min="0" value="${esc(v.minutes)}"></label></div>
   <div class="dur" aria-label="Quick time"><span class="hint" style="align-self:center">How long:</span>${[[30,'30m'],[60,'1h'],[90,'1½h'],[120,'2h'],[180,'3h'],[240,'4h'],[360,'6h']].map(([m,l])=>`<button type="button" data-action="dur" data-m="${m}">${l}</button>`).join('')}</div>
@@ -851,6 +854,55 @@ function openVisitForm(o){
   </form>`);
   updateVisitCalc($('#visitForm'));
 }
+/* ---------- searchable customer box ---------- */
+const isActive=c=>c&&c.status!=='paused';
+function custPick(name,selId,changeKey,disabled){
+  const c=S.customers[selId];
+  return `<div class="pick-wrap cust-pick"><input type="hidden" ${name?`name="${name}"`:''} value="${esc(selId||'')}"${changeKey?` data-change="${changeKey}"`:''}><input class="cust-q" autocomplete="off" placeholder="Search customers…" aria-label="Customer" role="combobox" aria-expanded="false" value="${esc(c?c.name:'')}"${disabled?' disabled':''}></div>`;
+}
+let custState=null;
+function openCustPicker(input,typed){
+  const wrap=input.closest('.cust-pick');let panel=wrap.querySelector('.picker');
+  if(!panel){panel=document.createElement('div');panel.className='picker';panel.setAttribute('role','listbox');wrap.appendChild(panel);}
+  const hid=wrap.querySelector('input[type=hidden]'),sel=S.customers[hid.value];
+  const q=typed?input.value.trim().toLowerCase():'';
+  const words=q.split(/\s+/).filter(Boolean);
+  const match=c=>{const s=((c.name||'')+' '+(c.address||'')).toLowerCase();return words.every(w=>s.includes(w));};
+  const all=sortedCustomers();
+  let items=all.filter(c=>isActive(c)&&match(c));
+  const paused=q?all.filter(c=>!isActive(c)&&match(c)):[];
+  let html=items.map((c,i)=>`<button type="button" role="option" data-cust="${esc(c.id)}" aria-selected="${(q?i===0:c.id===hid.value)?'true':'false'}"><span>${esc(c.name)}</span><span>${c.pricing==='monthly'?'monthly':esc(((c.address||'').split('\n').slice(-2,-1)[0]||'').trim())}</span></button>`).join('');
+  if(paused.length)html+=`<h4>Paused</h4>`+paused.map(c=>`<button type="button" role="option" data-cust="${esc(c.id)}"><span>${esc(c.name)}</span><span>paused</span></button>`).join('');
+  if(!html)html=`<div class="none">No customers match “${esc(input.value.trim())}”.</div>`;
+  panel.innerHTML=html;input.setAttribute('aria-expanded','true');
+  const btns=[...panel.querySelectorAll('[data-cust]')];
+  custState={input,idx:Math.max(0,btns.findIndex(b=>b.getAttribute('aria-selected')==='true'))};
+  if(!q){const s=btns[custState.idx];s&&s.scrollIntoView({block:'nearest'});}
+}
+function closeCustPicker(restore){
+  if(!custState)return;const input=custState.input,wrap=input.closest('.cust-pick');
+  const p=wrap&&wrap.querySelector('.picker');if(p)p.remove();input.setAttribute('aria-expanded','false');
+  if(restore){const c=S.customers[wrap.querySelector('input[type=hidden]').value];input.value=c?c.name:'';}
+  custState=null;
+}
+function chooseCust(id){
+  if(!custState)return;const input=custState.input,hid=input.closest('.cust-pick').querySelector('input[type=hidden]');
+  const changed=hid.value!==id;hid.value=id;input.value=S.customers[id]?.name||'';closeCustPicker(false);input.blur();
+  if(changed)hid.dispatchEvent(new Event('change',{bubbles:true}));
+}
+document.addEventListener('focusin',e=>{if(e.target.classList&&e.target.classList.contains('cust-q')){e.target.select();openCustPicker(e.target,false);}});
+document.addEventListener('focusout',e=>{if(e.target.classList&&e.target.classList.contains('cust-q'))setTimeout(()=>{if(custState&&custState.input===e.target&&document.activeElement!==e.target)closeCustPicker(true);},180);});
+document.addEventListener('input',e=>{if(e.target.classList&&e.target.classList.contains('cust-q'))openCustPicker(e.target,true);});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-cust]');if(b){e.preventDefault();e.stopPropagation();chooseCust(b.dataset.cust);}},true);
+document.addEventListener('keydown',e=>{
+  if(!custState||e.target!==custState.input)return;
+  const btns=[...custState.input.closest('.cust-pick').querySelectorAll('[data-cust]')];
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(!btns.length)return;custState.idx=(custState.idx+(e.key==='ArrowDown'?1:-1)+btns.length)%btns.length;
+    btns.forEach((b,i)=>b.setAttribute('aria-selected',i===custState.idx?'true':'false'));btns[custState.idx].scrollIntoView({block:'nearest'});}
+  else if(e.key==='Enter'){e.preventDefault();const b=btns[custState.idx];if(b)chooseCust(b.dataset.cust);}
+  else if(e.key==='Escape'){e.stopPropagation();closeCustPicker(true);custState=null;e.target.blur();}
+},true);
+
 /* ---------- products & services picker ---------- */
 function catalogue(){
   const out=[],seen=new Set();
@@ -1017,6 +1069,7 @@ document.addEventListener('click',async e=>{
     case 'edit-visit':openVisitForm({id});break;
     case 'vfilter':S.visitFilter=a.dataset.f;render(true);break;
     case 'add-mat':{$('#matRows').insertAdjacentHTML('beforeend',matRow());const r=$('#matRows').lastElementChild;r.querySelector('input').focus();break;}
+    case 'toggle-paused':S.showPaused=!S.showPaused;$('#custList').innerHTML=custListHtml($('#custSearch')?$('#custSearch').value:'');break;
     case 'add-extra':{syncExtras();(S.inv.extras=S.inv.extras||[]).push({name:'',qty:1,price:''});render(true);const r=$('#invExtras')?.lastElementChild;r&&r.querySelector('input').focus();break;}
     case 'remove-mat':{const box=a.closest('#invExtras'),f=a.closest('#visitForm');a.closest('.mat-row').remove();if(f)updateVisitCalc(f);if(box){syncExtras();render(true);}break;}
     case 'dur':{const f=$('#visitForm'),el=f.elements,m=Number(a.dataset.m);
