@@ -97,7 +97,21 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .check{display:flex;gap:10px;align-items:center;margin-top:14px;font-size:.95rem}
 .mat-row{display:grid;grid-template-columns:1fr 62px 86px 44px;gap:6px;align-items:end}
 form[data-lt="hourly"] .only-fixed,form[data-lt="fixed"] .only-hourly,
-form[data-pr="hourly"] .only-fixed,form[data-pr="fixed"] .only-hourly{display:none}
+form[data-pr="hourly"] .only-fixed,form[data-pr="fixed"] .only-hourly,
+form[data-lt="contract"] .only-hourly,form[data-lt="contract"] .only-fixed,
+form[data-pr="monthly"] .only-hourly,form[data-pr="monthly"] .only-fixed,
+form:not([data-pr="monthly"]) .only-monthly{display:none}
+.pick-wrap{position:relative;min-width:0}
+.picker{position:absolute;left:0;top:calc(100% + 4px);z-index:40;width:min(420px,calc(100vw - 48px));max-height:300px;overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25);padding:4px 0}
+.picker h4{margin:0;padding:8px 12px 2px;font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.picker button{display:flex;justify-content:space-between;gap:12px;width:100%;padding:10px 12px;min-height:44px;border:0;background:none;color:var(--ink);font:inherit;font-size:.95rem;text-align:left;cursor:pointer}
+.picker button span:last-child{color:var(--muted);flex-shrink:0}
+.picker button:hover,.picker button[aria-selected="true"]{background:var(--surface-2)}
+.picker .none{padding:10px 12px;color:var(--muted);font-size:.9rem}
+.dur{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.dur button{font:inherit;font-size:.9rem;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;min-height:40px;cursor:pointer}
+.dur button:hover{border-color:var(--moss)}
+.warnbox{border:1.5px solid var(--due);border-radius:12px;padding:10px 12px;margin-top:12px;font-size:.92rem}
 .totals{margin-top:18px;padding:14px 16px;border-radius:16px;background:var(--surface);border:1px solid var(--line)}
 .totals div{display:flex;justify-content:space-between;gap:12px;padding:3px 0}
 .totals .grand{font-family:"Lato",system-ui,sans-serif;font-size:1.35rem;font-weight:700;border-top:1px solid var(--line);margin-top:6px;padding-top:10px}
@@ -220,7 +234,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 
 /* ---------- state ---------- */
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
-  inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:''},downloads:null};
+  inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
 const APP_VERSION='2026-10-06-1';let updateWaiting=null;
 function applyUpdate(v){
@@ -276,7 +290,7 @@ const custName=id=>S.customers[id]?.name||'Removed customer';
 const sortedCustomers=()=>Object.values(S.customers).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
 function visitTotals(v){
   const mins=Number(v.minutes)||0;
-  const labour=v.labourType==='fixed'?Number(v.fixedPrice)||0:(mins/60)*(Number(v.rate)||0);
+  const labour=v.labourType==='contract'?0:v.labourType==='fixed'?Number(v.fixedPrice)||0:(mins/60)*(Number(v.rate)||0);
   const materials=(v.materials||[]).reduce((s,m)=>s+(Number(m.qty)||0)*(Number(m.price)||0),0);
   return{mins,labour:r2(labour),materials:r2(materials),total:r2(r2(labour)+r2(materials))};
 }
@@ -290,7 +304,8 @@ function schedule(c){
   else due=c.frequency==='monthly'?addMonths(last,1):addDays(last,f.d);
   return{last,due,inDays:daysBetween(today,due),since:last?daysBetween(last,today):null,freq:f.d};
 }
-function pricingLabel(c){return c.pricing==='fixed'?`${gbp(c.price)} per visit`:`${gbp(c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate)} an hour`;}
+const ltFor=c=>c&&c.pricing==='fixed'?'fixed':c&&c.pricing==='monthly'?'contract':'hourly';
+function pricingLabel(c){if(c.pricing==='monthly')return `${gbp(c.monthly)} a month (contract)`;return c.pricing==='fixed'?`${gbp(c.price)} per visit`:`${gbp(c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate)} an hour`;}
 
 /* ---------- rendering ---------- */
 function render(force){
@@ -473,27 +488,34 @@ function viewInvoice(){
   const I=S.inv;
   if(!I.customerId||!S.customers[I.customerId]){
     const w=custs.find(c=>S.visits.some(v=>v.customerId===c.id&&!v.invoiced));
-    I.customerId=(w||custs[0]).id;I.from=null;I.to=null;I.excluded=new Set();
+    I.customerId=(w||custs[0]).id;I.from=null;I.to=null;I.excluded=new Set();I.extras=[];I.month=null;
   }
   const c=S.customers[I.customerId];
-  const ready=custs.map(x=>{const vs=S.visits.filter(v=>v.customerId===x.id&&!v.invoiced);return{x,n:vs.length,t:vs.reduce((s,v)=>s+visitTotals(v).total,0)};}).filter(r=>r.n);
-  const readyHtml=ready.length?`<div class="ready"><h3>Ready to invoice</h3>${ready.map(r=>`<button class="item${r.x.id===I.customerId?' on':''}" data-action="inv-pick" data-id="${esc(r.x.id)}"><span class="item-main"><strong>${esc(r.x.name)}</strong><span class="item-sub">${r.n} completed visit${r.n===1?'':'s'} not yet invoiced</span></span><span class="item-end">${gbp(r.t)}</span></button>`).join('')}</div>`:`<p class="muted" style="margin:8px 0">Every completed visit has been invoiced.</p>`;
+  const thisMonth=todayStr().slice(0,7);
+  const ready=custs.map(x=>{
+    if(x.pricing==='monthly'){if(x.status==='paused'||S.invoices.some(i=>i.customerId===x.id&&i.contractMonth===thisMonth))return{x,n:0};
+      const mi=monthInfo(thisMonth),vs=S.visits.filter(v=>v.customerId===x.id&&!v.invoiced&&v.date>=mi.start&&v.date<=mi.end);
+      return{x,n:1,contract:mi.label,t:(Number(x.monthly)||0)+vs.reduce((s,v)=>s+visitTotals(v).total,0)};}
+    const vs=S.visits.filter(v=>v.customerId===x.id&&!v.invoiced);return{x,n:vs.length,t:vs.reduce((s,v)=>s+visitTotals(v).total,0)};}).filter(r=>r.n);
+  const readyHtml=ready.length?`<div class="ready"><h3>Ready to invoice</h3>${ready.map(r=>`<button class="item${r.x.id===I.customerId?' on':''}" data-action="inv-pick" data-id="${esc(r.x.id)}"><span class="item-main"><strong>${esc(r.x.name)}</strong><span class="item-sub">${r.contract?`${esc(r.contract)} contract not yet invoiced`:`${r.n} completed visit${r.n===1?'':'s'} not yet invoiced`}</span></span><span class="item-end">${gbp(r.t)}</span></button>`).join('')}</div>`:`<p class="muted" style="margin:8px 0">Every completed visit has been invoiced.</p>`;
   const un=S.visits.filter(v=>v.customerId===c.id&&!v.invoiced).map(v=>v.date).sort();
   if(!I.from)I.from=un[0]||todayStr().slice(0,8)+'01';
   if(!I.to)I.to=todayStr();
   const visits=S.visits.filter(v=>v.customerId===c.id&&v.date>=I.from&&v.date<=I.to&&(I.showInvoiced||!v.invoiced)).sort((a,b)=>a.date.localeCompare(b.date));
   const chosen=visits.filter(v=>!I.excluded.has(v.id));
+  if(c.pricing==='monthly'){I.text='';return `<h2 class="page-title">Invoices</h2>${segs}<p class="muted">Completed visits that haven’t been invoiced are gathered here for each customer.</p>${readyHtml}
+  <label class="f">Customer<select data-change="inv-customer">${custs.map(x=>`<option value="${esc(x.id)}"${x.id===c.id?' selected':''}>${esc(x.name)}${x.pricing==='monthly'?' (monthly)':''}</option>`).join('')}</select></label>${contractSectionHtml(c)}`;}
   let h=`<h2 class="page-title">Invoices</h2>${segs}<p class="muted">Completed visits that haven’t been invoiced are gathered here for each customer.</p>${readyHtml}
-  <label class="f">Customer<select data-change="inv-customer">${custs.map(x=>`<option value="${esc(x.id)}"${x.id===c.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
+  <label class="f">Customer<select data-change="inv-customer">${custs.map(x=>`<option value="${esc(x.id)}"${x.id===c.id?' selected':''}>${esc(x.name)}${x.pricing==='monthly'?' (monthly)':''}</option>`).join('')}</select></label>
   <div class="row2"><label class="f">From<input type="date" data-change="inv-from" value="${I.from}"></label><label class="f">To<input type="date" data-change="inv-to" value="${I.to}"></label></div>
   <label class="check"><input type="checkbox" data-change="inv-show"${I.showInvoiced?' checked':''}> Include visits already invoiced</label>`;
   if(!visits.length){I.text='';return h+`<p class="muted" style="margin-top:18px">No visits to bill between these dates.</p>`;}
   h+=`<div style="margin-top:12px">${visits.map(v=>`<label class="pick"><input type="checkbox" data-change="inv-toggle" data-id="${esc(v.id)}"${I.excluded.has(v.id)?'':' checked'}><span class="pick-main"><strong>${niceDate(v.date,{weekday:'short',day:'numeric',month:'short'})}</strong><span class="item-sub">${esc((v.tasks||[]).join(', ')||'Garden maintenance')}</span></span><span class="item-end">${gbp(visitTotals(v).total)}${v.invoiced?'<span class="badge ok">Invoiced</span>':''}</span></label>`).join('')}</div>`;
   if(!chosen.length){I.text='';return h+`<p class="muted" style="margin-top:18px">Tick at least one visit to build the summary.</p>`;}
   let lab=0,mat=0,mins=0;for(const v of chosen){const t=visitTotals(v);lab+=t.labour;mat+=t.materials;mins+=t.mins;}
-  I.text=invoiceText(c,chosen,I.from,I.to);
+  I.text=invoiceText(c,chosen,I.from,I.to);{const ex=extrasLines();if(ex.length)I.text+='\n\nExtras\n'+ex.map(l=>`${fmtNum(l.qty)} x ${l.desc} at ${gbp(l.unit)} – ${gbp(l.amount)}`).join('\n');}
   const toMark=chosen.filter(v=>!v.invoiced).length;
-  h+=`<div class="totals"><div><span>${chosen.length} visit${chosen.length===1?'':'s'}${mins?`, ${fmtMins(mins)}`:''}</span><span></span></div><div><span>Labour</span><span>${gbp(lab)}</span></div><div><span>Materials and goods</span><span>${gbp(mat)}</span></div><div class="grand"><span>Total</span><span>${gbp(lab+mat)}</span></div></div>
+  h+=`<p class="muted" style="margin-top:14px">${chosen.length} visit${chosen.length===1?'':'s'}${mins?`, ${fmtMins(mins)}`:''}</p>${draftTotalsHtml(draftInvoice())}${extrasSectionHtml()}
   <details class="f" style="margin-top:14px"><summary>Text summary (for Tide or email)</summary><textarea class="summary" readonly rows="12">${esc(I.text)}</textarea></details>
   <div class="actions"><button class="btn primary" data-action="create-invoice">Create invoice</button><button class="btn" data-action="copy-summary">Copy summary</button>${toMark?`<button class="btn" data-action="mark-invoiced">Mark ${toMark} as invoiced</button>`:''}</div>`;
   return h;
@@ -504,7 +526,7 @@ function invoiceText(c,visits,from,to){
   L.push(`Garden maintenance, ${niceDate(from,long)} to ${niceDate(to,long)}`,'','Work carried out');
   let lab=0;const agg={};
   for(const v of visits){const t=visitTotals(v);lab+=t.labour;
-    const extra=v.labourType==='fixed'?'':t.mins?` (${fmtMins(t.mins)})`:'';
+    const extra=v.labourType==='contract'?' (included in contract)':v.labourType==='fixed'?'':t.mins?` (${fmtMins(t.mins)})`:'';
     L.push(`${niceDate(v.date,{weekday:'short',day:'numeric',month:'short'})}: ${(v.tasks||[]).join(', ')||'Garden maintenance'}${extra} – ${gbp(t.labour)}`);
     for(const m of v.materials||[]){const k=m.name+'|'+(Number(m.price)||0);agg[k]=agg[k]||{name:m.name,price:Number(m.price)||0,qty:0};agg[k].qty+=Number(m.qty)||0;}}
   const mats=Object.values(agg);let mat=0;
@@ -519,6 +541,7 @@ function viewSettings(){
   <label class="f">Business name<input name="businessName" value="${esc(s.businessName)}" autocomplete="organization"></label>
   <label class="f">Default hourly rate (£) <span class="hint">used when a customer has no rate of their own</span><input name="hourlyRate" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(s.hourlyRate||'')}"></label>
   <label class="f">Jobs you offer <span class="hint">one per line</span><textarea name="tasks" rows="7">${esc((s.tasks||[]).join('\n'))}</textarea></label>
+  <label class="f">Extra services you charge for <span class="hint">one per line, as name, price; these appear first in the extras list</span><textarea name="services" rows="4" placeholder="Green waste removal (load), 45">${esc((s.services||[]).map(m=>`${m.name}, ${Number(m.price||0).toFixed(2)}`).join('\n'))}</textarea></label>
   <label class="f">Materials you often supply <span class="hint">one per line, as name, price</span><textarea name="materials" rows="5" placeholder="Compost (bag), 6.50">${esc((s.materials||[]).map(m=>`${m.name}, ${Number(m.price||0).toFixed(2)}`).join('\n'))}</textarea></label>
   <h2 class="section-h">On your invoices</h2>
   <label class="f">Business address<textarea name="address" rows="3" autocomplete="street-address">${esc(s.address)}</textarea></label>
@@ -624,7 +647,8 @@ function invoiceLines(visits){
   const lines=[],agg={};
   for(const v of [...visits].sort((a,b)=>a.date.localeCompare(b.date))){
     const t=visitTotals(v),what=`${niceDate(v.date,{weekday:'short',day:'numeric',month:'short'})}: ${(v.tasks||[]).join(', ')||'Garden maintenance'}`;
-    if(v.labourType==='fixed')lines.push({desc:what,qty:1,unit:t.labour,amount:t.labour});
+    if(v.labourType==='contract'){}
+    else if(v.labourType==='fixed')lines.push({desc:what,qty:1,unit:t.labour,amount:t.labour});
     else if(t.mins)lines.push({desc:what,qty:r2(t.mins/60),unit:Number(v.rate)||0,amount:t.labour,hours:true});
     for(const m of v.materials||[]){const k=m.name+'|'+(Number(m.price)||0);agg[k]=agg[k]||{name:m.name,price:Number(m.price)||0,qty:0};agg[k].qty+=Number(m.qty)||0;}
   }
@@ -636,19 +660,22 @@ function chosenVisits(){
   return S.visits.filter(v=>v.customerId===I.customerId&&v.date>=I.from&&v.date<=I.to&&(I.showInvoiced||!v.invoiced)&&!I.excluded.has(v.id));
 }
 async function createInvoice(btn){
-  const c=S.customers[S.inv.customerId],chosen=chosenVisits();
-  if(!c||!chosen.length)return toast('Tick at least one visit first.');
+  syncExtras();const d=draftInvoice();if(!d)return;
+  const c=d.c,chosen=d.visits;
+  if(!d.contract&&!chosen.length)return toast('Tick at least one visit first.');
+  const bad=(S.inv.extras||[]).find(x=>x.name&&x.qty>0&&!(x.price>0));
+  if(bad)return toast(`Add a price for “${bad.name}”, or remove that row.`);
   const st=S.settings,n=Number(st.nextInvoice)||1,today=todayStr();
-  const lines=invoiceLines(chosen);
+  const lines=d.lines;
   const inv={number:`${st.invoicePrefix??'TLG-'}${String(n).padStart(4,'0')}`,customerId:c.id,customerName:c.name,customerAddress:c.address||'',
     customerEmail:(c.email||'').split(',')[0].trim(),issueDate:today,dueDate:addDays(today,Number(st.paymentDays)||14),lines,
-    total:r2(lines.reduce((s,l)=>s+l.amount,0)),visitIds:chosen.map(v=>v.id),status:'unpaid',paidOn:null,createdAt:new Date().toISOString()};
+    total:r2(lines.reduce((s,l)=>s+l.amount,0)),visitIds:chosen.map(v=>v.id),...(d.contract?{contractMonth:d.mi.month}:{}),status:'unpaid',paidOn:null,createdAt:new Date().toISOString()};
   const id=newId();btn.disabled=true;
   try{
     await saveSettings({...clone(S.settings),nextInvoice:n+1});
     await store.put('invoices',id,inv);
     for(const v of chosen){const{id:vid,...rest}=clone(v);await store.put('visits',vid,{...rest,invoiced:true,invoicedOn:today,invoiceId:id});}
-    S.inv.excluded=new Set();openInvoiceSheet(id,inv);toast(`Invoice ${inv.number} created`);
+    S.inv.excluded=new Set();S.inv.extras=[];openInvoiceSheet(id,inv);toast(`Invoice ${inv.number} created`);
   }catch(e){btn.disabled=false;toast('The invoice didn’t save. Check your signal and try again.');}
 }
 function paymentsOf(inv){if(inv.payments&&inv.payments.length)return [...inv.payments].sort((a,b)=>a.date.localeCompare(b.date));
@@ -748,7 +775,7 @@ const uniq=a=>[...new Set(a.filter(Boolean))];
 
 function openCustomerForm(id){
   const c=id&&S.customers[id]?clone(S.customers[id]):{name:'',address:'',phone:'',email:'',frequency:'fortnightly',status:'active',pricing:'hourly',rate:'',price:'',tasks:[],nextDue:'',notes:''};
-  const pr=c.pricing==='fixed'?'fixed':'hourly';
+  const pr=c.pricing==='fixed'||c.pricing==='monthly'?c.pricing:'hourly';
   const hist=id?S.visits.filter(v=>v.customerId===id).sort((a,b)=>b.date.localeCompare(a.date)):[];
   openSheet(`<form id="custForm" data-id="${esc(id||'')}" data-pr="${pr}">${head(id?'Edit customer':'New customer')}
   <label class="f">Name<input name="name" required value="${esc(c.name)}" autocomplete="off"></label>
@@ -763,9 +790,12 @@ function openCustomerForm(id){
   <label class="f">Schedule runs from <span class="hint">first visit of the pattern; later visits repeat from this date</span><input name="nextDue" type="date" value="${esc(c.nextDue)}"></label></fieldset>
   <fieldset class="f"><legend>How you charge</legend><div class="chips">
   <label class="chip"><input type="radio" name="pricing" value="hourly"${pr==='hourly'?' checked':''}><span>By the hour</span></label>
-  <label class="chip"><input type="radio" name="pricing" value="fixed"${pr==='fixed'?' checked':''}><span>Fixed price per visit</span></label></div>
+  <label class="chip"><input type="radio" name="pricing" value="fixed"${pr==='fixed'?' checked':''}><span>Fixed price per visit</span></label>
+  <label class="chip"><input type="radio" name="pricing" value="monthly"${pr==='monthly'?' checked':''}><span>Monthly contract</span></label></div>
   <label class="f only-hourly">Hourly rate (£) <span class="hint">blank uses ${gbp(S.settings.hourlyRate)}</span><input name="rate" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(c.rate)}"></label>
-  <label class="f only-fixed">Price per visit (£)<input name="price" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(c.price)}"></label></fieldset>
+  <label class="f only-fixed">Price per visit (£)<input name="price" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(c.price)}"></label>
+  <label class="f only-monthly">Monthly amount (£) <span class="hint">billed once a month, however many visits</span><input name="monthly" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(c.monthly??'')}"></label>
+  <label class="f only-monthly">Wording on the invoice <span class="hint">the month is added automatically</span><input name="contractDesc" placeholder="Grounds maintenance" value="${esc(c.contractDesc||'')}"></label></fieldset>
   <fieldset class="f"><legend>Usual jobs</legend>${taskChips(uniq([...(S.settings.tasks||[]),...(c.tasks||[])]),c.tasks||[])}</fieldset>
   <label class="f">Notes <span class="hint">access, gate codes, dogs, where to put waste</span><textarea name="notes" rows="2">${esc(c.notes)}</textarea></label>
   <div class="actions"><button class="btn primary" type="submit">Save customer</button>${id&&S.visits.some(v=>v.customerId===id&&!v.invoiced)?`<button type="button" class="btn" data-action="inv-pick" data-id="${esc(id)}">Invoice completed visits</button>`:''}${id?`<button type="button" class="btn" data-action="log-visit" data-id="${esc(id)}">Log visit</button><button type="button" class="btn warn" data-action="delete-customer" data-id="${esc(id)}">Delete</button>`:''}</div>
@@ -777,11 +807,12 @@ async function saveCustomer(form){
   const num=x=>{const n=parseFloat(x);return isNaN(n)?'':n;};
   const c={name:(fd.get('name')||'').trim(),address:(fd.get('address')||'').trim(),phone:(fd.get('phone')||'').trim(),email:(fd.get('email')||'').trim(),
     frequency:fd.get('frequency'),status:fd.get('status'),nextDue:fd.get('nextDue')||'',pricing:fd.get('pricing')||'hourly',
-    rate:num(fd.get('rate')),price:num(fd.get('price')),tasks:fd.getAll('task'),notes:(fd.get('notes')||'').trim(),createdAt:prev.createdAt||new Date().toISOString(),
+    rate:num(fd.get('rate')),price:num(fd.get('price')),monthly:num(fd.get('monthly')),contractDesc:(fd.get('contractDesc')||'').trim(),tasks:fd.getAll('task'),notes:(fd.get('notes')||'').trim(),createdAt:prev.createdAt||new Date().toISOString(),
     day:fd.get('day')===''?'':Number(fd.get('day')),startTime:fd.get('startTime')||'',duration:parseInt(fd.get('duration'),10)||60};
   for(const k of Object.keys(prev))if(!(k in c)&&k!=='id')c[k]=prev[k];
   if(c.day!==''){let a=c.nextDue||todayStr(),n=0;while(dow(a)!==c.day&&n++<7)a=addDays(a,1);c.nextDue=a;}
   if(!c.name)return toast('Add the customer’s name first.');
+  if(c.pricing==='monthly'&&!(c.monthly>0))return toast('Add the monthly amount for this contract.');
   await persist(form,()=>store.put('customers',id,c),'Customer saved');
 }
 
@@ -794,23 +825,25 @@ function openVisitForm(o){
   if(ex)v=clone(ex);
   else{const c=S.customers[o.customerId]||custs[0];
     v={customerId:c.id,date:o.date||todayStr(),start:o.start||'',end:o.end||'',minutes:o.start&&o.end?minsBetween(o.start,o.end):'',
-      tasks:(c.tasks||[]).slice(),materials:[],labourType:c.pricing==='fixed'?'fixed':'hourly',
+      tasks:(c.tasks||[]).slice(),materials:[],labourType:ltFor(c),
       rate:c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate,fixedPrice:c.price??'',notes:'',invoiced:false,scheduledKey:o.scheduledKey||''};}
-  const lt=v.labourType==='fixed'?'fixed':'hourly';
+  const lt=['fixed','contract'].includes(v.labourType)?v.labourType:'hourly';
+  const isContract=S.customers[v.customerId]?.pricing==='monthly'||lt==='contract';
   const known=uniq([...(S.settings.tasks||[]),...(S.customers[v.customerId]?.tasks||[]),...(v.tasks||[])]);
   openSheet(`<form id="visitForm" data-id="${esc(ex?ex.id:'')}" data-timer="${o.fromTimer?'1':''}" data-lt="${lt}">${head(ex?'Edit visit':'Log a visit')}<input type="hidden" name="scheduledKey" value="${esc(v.scheduledKey||'')}">
   <label class="f">Customer<select name="customerId" data-change="vf-customer"${ex?'':''}>${custs.map(c=>`<option value="${esc(c.id)}"${c.id===v.customerId?' selected':''}>${esc(c.name)}${c.status==='paused'?' (paused)':''}</option>`).join('')}</select></label>
   <label class="f">Date<input type="date" name="date" required value="${esc(v.date)}"></label>
   <div class="row3"><label class="f">Start<input type="time" name="start" value="${esc(v.start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(v.end)}"></label><label class="f">Minutes<input type="number" name="minutes" inputmode="numeric" min="0" value="${esc(v.minutes)}"></label></div>
+  <div class="dur" aria-label="Quick time"><span class="hint" style="align-self:center">How long:</span>${[[30,'30m'],[60,'1h'],[90,'1½h'],[120,'2h'],[180,'3h'],[240,'4h'],[360,'6h']].map(([m,l])=>`<button type="button" data-action="dur" data-m="${m}">${l}</button>`).join('')}</div>
   <fieldset class="f"><legend>Work done</legend>${taskChips(known,v.tasks||[])}<input name="otherTask" placeholder="Other work (optional)" aria-label="Other work"></fieldset>
   <fieldset class="f"><legend>Labour charge</legend><div class="chips">
   <label class="chip"><input type="radio" name="labourType" value="hourly"${lt==='hourly'?' checked':''}><span>By the hour</span></label>
-  <label class="chip"><input type="radio" name="labourType" value="fixed"${lt==='fixed'?' checked':''}><span>Fixed price</span></label></div>
+  <label class="chip"><input type="radio" name="labourType" value="fixed"${lt==='fixed'?' checked':''}><span>Fixed price</span></label>
+  <label class="chip" id="ltContract"${isContract?'':' hidden'}><input type="radio" name="labourType" value="contract"${lt==='contract'?' checked':''}><span>Included in contract</span></label></div>
   <label class="f only-hourly">Hourly rate (£)<input name="rate" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(v.rate)}"></label>
   <label class="f only-fixed">Price for this visit (£)<input name="fixedPrice" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(v.fixedPrice)}"></label></fieldset>
-  <fieldset class="f"><legend>Materials and goods <span class="hint">item, quantity, price each</span></legend><div id="matRows">${(v.materials||[]).map(matRow).join('')}</div>
-  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-mat">Add an item</button></div></fieldset>
-  <datalist id="matlist">${(S.settings.materials||[]).map(m=>`<option value="${esc(m.name)}">`).join('')}</datalist>
+  <fieldset class="f"><legend>Extras: products and services <span class="hint">pick from the list or type your own; leave empty if none</span></legend><div id="matRows">${(v.materials||[]).map(matRow).join('')}</div>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-mat">+ Add an extra</button></div></fieldset>
   <label class="f">Notes<textarea name="notes" rows="2">${esc(v.notes)}</textarea></label>
   ${ex?`<label class="check"><input type="checkbox" name="invoiced"${v.invoiced?' checked':''}> Invoiced</label>`:''}
   <div class="totals" id="vfTotals"></div>
@@ -818,21 +851,123 @@ function openVisitForm(o){
   </form>`);
   updateVisitCalc($('#visitForm'));
 }
+/* ---------- products & services picker ---------- */
+function catalogue(){
+  const out=[],seen=new Set();
+  const add=(name,price,group)=>{const k=(name||'').trim().toLowerCase();if(!k||seen.has(k))return;seen.add(k);out.push({name:name.trim(),price:Number(price)||0,group});};
+  for(const s of S.settings.services||[])add(s.name,s.price,'Services');
+  for(const m of S.settings.materials||[])add(m.name,m.price,'Products');
+  for(const t of S.settings.tasks||[])add(t,0,'Services');
+  return out;
+}
+function recentExtras(){
+  const seen=new Map();
+  const vs=[...S.visits].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  for(const v of vs)for(const m of v.materials||[]){const k=(m.name||'').toLowerCase();if(k&&!seen.has(k))seen.set(k,{name:m.name,price:Number(m.price)||0,group:'Recently used'});if(seen.size>=6)break;}
+  return [...seen.values()];
+}
+let pickState=null;
+function openPicker(input){
+  const wrap=input.closest('.pick-wrap');if(!wrap)return;
+  let panel=wrap.querySelector('.picker');
+  if(!panel){panel=document.createElement('div');panel.className='picker';panel.setAttribute('role','listbox');wrap.appendChild(panel);}
+  const q=input.value.trim().toLowerCase();
+  let items;
+  if(!q){items=[...recentExtras(),...catalogue().filter(x=>x.group==='Services'&&x.price>0),...catalogue().filter(x=>x.group==='Services'&&!x.price).slice(0,8),...catalogue().filter(x=>x.group==='Products').slice(0,12)];}
+  else{const words=q.split(/\s+/);items=catalogue().filter(x=>{const n=x.name.toLowerCase();return words.every(w=>n.includes(w));})
+    .sort((a,b)=>(b.name.toLowerCase().startsWith(q)-a.name.toLowerCase().startsWith(q))||(a.group===b.group?0:a.group==='Services'?-1:1)).slice(0,40);}
+  const seen=new Set();items=items.filter(x=>{const k=x.group+'|'+x.name.toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
+  let html='',g='';
+  items.forEach((x,i)=>{if(x.group!==g){g=x.group;html+=`<h4>${esc(g)}</h4>`;}
+    html+=`<button type="button" role="option" data-pick="${i}" aria-selected="${i===0&&q?'true':'false'}"><span>${esc(x.name)}</span><span>${x.price?gbp(x.price):'price on the day'}</span></button>`;});
+  if(!items.length)html=`<div class="none">Nothing matches. Keep typing to add “${esc(input.value.trim())}” as a one-off.</div>`;
+  if(!q)html+=`<div class="none">Type to search ${catalogue().length} products and services.</div>`;
+  panel.innerHTML=html;panel.hidden=false;input.setAttribute('aria-expanded','true');
+  pickState={input,items,idx:q&&items.length?0:-1};
+}
+function closePicker(){if(!pickState)return;const p=pickState.input.closest('.pick-wrap')?.querySelector('.picker');if(p)p.remove();pickState.input.setAttribute('aria-expanded','false');pickState=null;}
+function choosePick(i){
+  if(!pickState)return;const x=pickState.items[i],input=pickState.input;if(!x)return;
+  const row=input.closest('.mat-row');input.value=x.name;
+  const p=row.querySelector('[name=mprice]');if(x.price)p.value=x.price;else if(!p.value)p.value='';
+  closePicker();afterRowChange(input);
+  const next=x.price?row.querySelector('[name=mqty]'):p;next.focus();next.select&&next.select();
+}
+function afterRowChange(el){
+  if(el.closest('#visitForm'))updateVisitCalc($('#visitForm'));
+  if(el.closest('#invExtras'))syncExtras();
+}
+function syncExtras(){
+  const box=$('#invExtras');if(!box)return;
+  S.inv.extras=[...box.querySelectorAll('.mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||0,price:parseFloat(r.querySelector('[name=mprice]').value)||0}));
+  const d=draftInvoice(),t=$('#invTotals');if(d&&t)t.outerHTML=draftTotalsHtml(d);
+}
+document.addEventListener('focusin',e=>{if(e.target.name==='mname')openPicker(e.target);});
+document.addEventListener('focusout',e=>{if(e.target.name==='mname')setTimeout(()=>{if(pickState&&pickState.input===e.target&&document.activeElement!==e.target)closePicker();},180);});
+document.addEventListener('mousedown',e=>{if(e.target.closest('.picker'))e.preventDefault();});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(b){e.preventDefault();e.stopPropagation();choosePick(Number(b.dataset.pick));}},true);
+document.addEventListener('keydown',e=>{
+  if(!pickState||e.target!==pickState.input)return;
+  const btns=[...pickState.input.closest('.pick-wrap').querySelectorAll('[data-pick]')];
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(!btns.length)return;pickState.idx=(pickState.idx+(e.key==='ArrowDown'?1:-1)+btns.length)%btns.length;
+    btns.forEach((b,i)=>b.setAttribute('aria-selected',i===pickState.idx?'true':'false'));btns[pickState.idx].scrollIntoView({block:'nearest'});}
+  else if(e.key==='Enter'&&pickState.idx>=0){e.preventDefault();choosePick(pickState.idx);}
+  else if(e.key==='Escape'){e.stopPropagation();closePicker();}
+},true);
+
+/* ---------- invoice drafts (visits, monthly contracts, extras) ---------- */
+function monthInfo(month){
+  const start=month+'-01',end=addDays(addMonths(start,1),-1);
+  const [y,m]=month.split('-').map(Number);
+  return{month,start,end,label:new Date(Date.UTC(y,m-1,1)).toLocaleDateString('en-GB',{month:'long',year:'numeric',timeZone:'UTC'})};
+}
+function extrasLines(){return (S.inv.extras||[]).filter(x=>x.name&&x.qty>0).map(x=>({desc:x.name,qty:x.qty,unit:x.price,amount:r2(x.qty*x.price)}));}
+function draftInvoice(){
+  const I=S.inv,c=S.customers[I.customerId];if(!c)return null;
+  if(c.pricing==='monthly'){
+    const mi=monthInfo(I.month||todayStr().slice(0,7));
+    const visits=S.visits.filter(v=>v.customerId===c.id&&!v.invoiced&&v.date>=mi.start&&v.date<=mi.end);
+    const amt=r2(Number(c.monthly)||0);
+    const lines=[{desc:`${c.contractDesc||'Grounds maintenance'}, ${mi.label}`,qty:1,unit:amt,amount:amt},...invoiceLines(visits),...extrasLines()];
+    return{c,visits,lines,contract:true,mi,total:r2(lines.reduce((s,l)=>s+l.amount,0))};
+  }
+  const visits=chosenVisits(),lines=[...invoiceLines(visits),...extrasLines()];
+  return{c,visits,lines,contract:false,total:r2(lines.reduce((s,l)=>s+l.amount,0))};
+}
+function draftTotalsHtml(d){
+  return `<div class="totals" id="invTotals">${d.lines.map(l=>`<div><span>${esc(l.desc)}${l.hours?` (${fmtNum(l.qty)} hrs)`:l.qty!==1?` x ${fmtNum(l.qty)}`:''}</span><span>${gbp(l.amount)}</span></div>`).join('')}<div class="grand"><span>Total</span><span>${gbp(d.total)}</span></div></div>`;
+}
+function extrasSectionHtml(){
+  const rows=(S.inv.extras||[]).map(matRow).join('');
+  return `<fieldset class="f" style="margin-top:16px"><legend>Extras on this invoice <span class="hint">optional; empty rows are left off</span></legend><div id="invExtras">${rows}</div>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-extra">+ Add an extra</button></div></fieldset>`;
+}
+function contractSectionHtml(c){
+  const I=S.inv,d=draftInvoice(),mi=d.mi;
+  const done=S.invoices.find(i=>i.customerId===c.id&&i.contractMonth===mi.month);
+  const fromVisits=d.visits.filter(v=>(v.materials||[]).length||v.labourType!=='contract').length;
+  return `<label class="f">Month<input type="month" data-change="inv-month" value="${mi.month}"></label>
+  <p class="muted" style="margin-top:8px">Monthly contract: ${gbp(c.monthly)} a month. Visits don’t need ticking off${fromVisits?`; extras logged on ${fromVisits} visit${fromVisits===1?'':'s'} this month are added automatically`:''}.</p>
+  ${done?`<div class="warnbox">${esc(mi.label)} has already been invoiced (${esc(done.number)}). Creating another will bill this month again.</div>`:''}
+  ${draftTotalsHtml(d)}${extrasSectionHtml()}
+  <div class="actions"><button class="btn primary" data-action="create-invoice">Create ${esc(mi.label)} invoice</button></div>`;
+}
+
 function matRow(m){m=m||{name:'',qty:1,price:''};
-  return `<div class="mat-row"><input name="mname" list="matlist" placeholder="Item" value="${esc(m.name)}" aria-label="Item"><input name="mqty" type="number" inputmode="decimal" min="0" step="any" value="${esc(m.qty)}" aria-label="Quantity"><input name="mprice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${esc(m.price)}" aria-label="Price each"><button type="button" class="icon" data-action="remove-mat" aria-label="Remove item">×</button></div>`;}
+  return `<div class="mat-row"><div class="pick-wrap"><input name="mname" autocomplete="off" placeholder="Choose or type…" value="${esc(m.name)}" aria-label="Product or service" role="combobox" aria-expanded="false"></div><input name="mqty" type="number" inputmode="decimal" min="0" step="any" value="${esc(m.qty)}" aria-label="Quantity"><input name="mprice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${esc(m.price)}" aria-label="Price each"><button type="button" class="icon" data-action="remove-mat" aria-label="Remove item">×</button></div>`;}
 function readVisit(form){
   const fd=new FormData(form),tasks=fd.getAll('task'),other=(fd.get('otherTask')||'').trim();
   if(other)tasks.push(other);
   const materials=[...form.querySelectorAll('.mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||0,price:parseFloat(r.querySelector('[name=mprice]').value)||0})).filter(m=>m.name);
   return{customerId:fd.get('customerId'),date:fd.get('date')||'',start:fd.get('start')||'',end:fd.get('end')||'',minutes:parseInt(fd.get('minutes'),10)||0,
-    tasks:uniq(tasks),materials,labourType:fd.get('labourType')==='fixed'?'fixed':'hourly',rate:parseFloat(fd.get('rate'))||0,fixedPrice:parseFloat(fd.get('fixedPrice'))||0,
+    tasks:uniq(tasks),materials,labourType:['fixed','contract'].includes(fd.get('labourType'))?fd.get('labourType'):'hourly',rate:parseFloat(fd.get('rate'))||0,fixedPrice:parseFloat(fd.get('fixedPrice'))||0,
     notes:(fd.get('notes')||'').trim(),invoiced:fd.get('invoiced')==='on',scheduledKey:fd.get('scheduledKey')||''};
 }
 function updateVisitCalc(form,target){
   const el=form.elements;
   if(target&&(target.name==='start'||target.name==='end')&&el.start.value&&el.end.value)el.minutes.value=minsBetween(el.start.value,el.end.value);
   const v=readVisit(form),t=visitTotals(v);form.dataset.lt=v.labourType;
-  $('#vfTotals').innerHTML=`<div><span>Labour${v.labourType==='hourly'&&t.mins?` (${fmtMins(t.mins)} at ${gbp(v.rate)} an hour)`:''}</span><span>${gbp(t.labour)}</span></div><div><span>Materials and goods</span><span>${gbp(t.materials)}</span></div><div class="grand"><span>Total</span><span>${gbp(t.total)}</span></div>`;
+  $('#vfTotals').innerHTML=`<div><span>Labour${v.labourType==='contract'?' (included in monthly contract)':''}${v.labourType==='hourly'&&t.mins?` (${fmtMins(t.mins)} at ${gbp(v.rate)} an hour)`:''}</span><span>${gbp(t.labour)}</span></div><div><span>Extras</span><span>${gbp(t.materials)}</span></div><div class="grand"><span>Total</span><span>${gbp(t.total)}</span></div>`;
 }
 async function saveVisit(form){
   const v=readVisit(form);
@@ -882,7 +1017,12 @@ document.addEventListener('click',async e=>{
     case 'edit-visit':openVisitForm({id});break;
     case 'vfilter':S.visitFilter=a.dataset.f;render(true);break;
     case 'add-mat':{$('#matRows').insertAdjacentHTML('beforeend',matRow());const r=$('#matRows').lastElementChild;r.querySelector('input').focus();break;}
-    case 'remove-mat':a.closest('.mat-row').remove();updateVisitCalc($('#visitForm'));break;
+    case 'add-extra':{syncExtras();(S.inv.extras=S.inv.extras||[]).push({name:'',qty:1,price:''});render(true);const r=$('#invExtras')?.lastElementChild;r&&r.querySelector('input').focus();break;}
+    case 'remove-mat':{const box=a.closest('#invExtras'),f=a.closest('#visitForm');a.closest('.mat-row').remove();if(f)updateVisitCalc(f);if(box){syncExtras();render(true);}break;}
+    case 'dur':{const f=$('#visitForm'),el=f.elements,m=Number(a.dataset.m);
+      if(el.start.value)el.end.value=addMins(el.start.value,m);
+      else{const d=new Date(),nowM=Math.floor((d.getHours()*60+d.getMinutes())/5)*5;el.end.value=`${pad(Math.floor(nowM/60))}:${pad(nowM%60)}`;el.start.value=addMins(el.end.value,-m);}
+      el.minutes.value=m;updateVisitCalc(f);break;}
     case 'start-timer':
       try{await saveSettings({...clone(S.settings),timer:{customerId:id,start:new Date().toISOString(),scheduledKey:a.dataset.key||''}});closeSheet();toast('Timer started');}catch(err){toast('The timer didn’t start. Try again.');}
       break;
@@ -902,7 +1042,7 @@ document.addEventListener('click',async e=>{
     case 'copy-summary':copyText(S.inv.text);break;
     case 'inv-tab':S.invView=a.dataset.v;render(true);break;
     case 'create-invoice':createInvoice(a);break;
-    case 'inv-pick':closeSheet();S.tab='invoice';S.invView='new';Object.assign(S.inv,{customerId:id,from:null,to:null,excluded:new Set(),showInvoiced:false});render(true);
+    case 'inv-pick':closeSheet();S.tab='invoice';S.invView='new';Object.assign(S.inv,{customerId:id,from:null,to:null,excluded:new Set(),showInvoiced:false,extras:[],month:null});render(true);
       setTimeout(()=>{const el=document.querySelector('[data-action=create-invoice]');if(el)el.scrollIntoView({block:'center'});},50);break;
     case 'open-invoice':openInvoiceSheet(id);break;
     case 'inv-pdf':downloadPdf(id,false);break;
@@ -946,13 +1086,15 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('change',e=>{
   const t=e.target,k=t.dataset.change,I=S.inv;
-  if(t.name==='mname'){const m=(S.settings.materials||[]).find(x=>x.name.toLowerCase()===t.value.trim().toLowerCase());const p=t.closest('.mat-row').querySelector('[name=mprice]');if(m&&!p.value&&m.price)p.value=m.price;updateVisitCalc($('#visitForm'));}
+  if(t.name==='mname'){const m=catalogue().find(x=>x.name.toLowerCase()===t.value.trim().toLowerCase());const p=t.closest('.mat-row').querySelector('[name=mprice]');if(m&&!p.value&&m.price)p.value=m.price;afterRowChange(t);}
   if(!k)return;
   if(k==='vf-customer'){const f=$('#visitForm');if(f.dataset.id)return;const c=S.customers[t.value];if(!c)return;
     f.querySelectorAll('[name=task]').forEach(x=>x.checked=(c.tasks||[]).includes(x.value));
-    f.querySelector(`[name=labourType][value=${c.pricing==='fixed'?'fixed':'hourly'}]`).checked=true;
+    const lc=$('#ltContract');if(lc)lc.hidden=c.pricing!=='monthly';
+    f.querySelector(`[name=labourType][value=${ltFor(c)}]`).checked=true;
     f.elements.rate.value=c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate;f.elements.fixedPrice.value=c.price??'';updateVisitCalc(f);return;}
-  if(k==='inv-customer'){I.customerId=t.value;I.from=null;I.to=null;I.excluded=new Set();}
+  if(k==='inv-customer'){I.customerId=t.value;I.from=null;I.to=null;I.excluded=new Set();I.extras=[];I.month=null;}
+  else if(k==='inv-month'){if(t.value)I.month=t.value;}
   else if(k==='inv-from'){if(t.value)I.from=t.value;}
   else if(k==='inv-to'){if(t.value)I.to=t.value;}
   else if(k==='inv-show')I.showInvoiced=t.checked;
@@ -961,6 +1103,8 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('input',e=>{
   const f=e.target.closest('form');
+  if(e.target.name==='mname')openPicker(e.target);
+  if(e.target.closest&&e.target.closest('#invExtras'))syncExtras();
   if(f&&f.id==='visitForm')updateVisitCalc(f,e.target);
   if(f&&f.id==='custForm'&&e.target.name==='pricing')f.dataset.pr=e.target.value;
   if(e.target.id==='custSearch')$('#custList').innerHTML=custListHtml(e.target.value);
@@ -974,10 +1118,11 @@ document.addEventListener('submit',async e=>{
   else if(f.id==='settingsForm'){
     const fd=new FormData(f);
     const tasks=uniq(String(fd.get('tasks')||'').split('\n').map(s=>s.trim()));
-    const materials=String(fd.get('materials')||'').split('\n').map(s=>s.trim()).filter(Boolean).map(line=>{const i=line.lastIndexOf(',');
+    const priced=k=>String(fd.get(k)||'').split('\n').map(s=>s.trim()).filter(Boolean).map(line=>{const i=line.lastIndexOf(',');
       if(i<0)return{name:line,price:0};const p=parseFloat(line.slice(i+1).replace(/[£\s]/g,''));return isNaN(p)?{name:line,price:0}:{name:line.slice(0,i).trim(),price:p};});
+    const materials=priced('materials'),services=priced('services');
     const g=k=>String(fd.get(k)||'').trim();
-    const next={...clone(S.settings),businessName:g('businessName'),hourlyRate:parseFloat(fd.get('hourlyRate'))||0,tasks,materials,
+    const next={...clone(S.settings),businessName:g('businessName'),hourlyRate:parseFloat(fd.get('hourlyRate'))||0,tasks,materials,services,
       address:g('address'),phone:g('phone'),email:g('email'),bankName:g('bankName'),sortCode:g('sortCode'),accountNumber:g('accountNumber'),
       paymentDays:parseInt(fd.get('paymentDays'),10)||0,invoicePrefix:g('invoicePrefix'),nextInvoice:Math.max(1,parseInt(fd.get('nextInvoice'),10)||1),invoiceFooter:g('invoiceFooter')};
     const btn=f.querySelector('[type=submit]');btn.disabled=true;
