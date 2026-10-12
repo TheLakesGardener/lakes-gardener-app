@@ -627,8 +627,9 @@ function invoicePdf(inv,receipt){
   }
   y+=10;
   T(cols.unit,y+4,'Total',11,true,INK,'right');T(cols.amt,y+4,gbp(inv.total),12,true,INK,'right');
-  if(receipt){y+=20;T(cols.unit,y+4,'Amount paid',10,false,INK,'right');T(cols.amt,y+4,gbp(paidAmount(inv)),10,false,INK,'right');
-    y+=16;T(cols.unit,y+4,'Balance due',10,true,INK,'right');T(cols.amt,y+4,gbp(balanceDue(inv)),10,true,INK,'right');}
+  if(receipt){y+=26;const GREEN='0.16 0.42 0.05',HL='0.89 0.96 0.78';box(cols.qty-30,y-14,R-(cols.qty-30),28,HL);ln(cols.qty-30,y-14,cols.qty-30,y+14,LIME,3);
+    T(cols.unit,y+5,'Amount paid',12,true,GREEN,'right');T(cols.amt,y+5,gbp(paidAmount(inv)),13,true,GREEN,'right');y+=6;
+    y+=16;T(cols.unit,y+4,'Account balance',10,true,INK,'right');T(cols.amt,y+4,gbp(accountBalance(inv)),10,true,INK,'right');}
   y+=34;
   if(y>H-190){footer();pages.push(c);c='';y=70;}
   if(receipt){const pays=paymentsOf(inv),full=balanceDue(inv)<=0,bh=46+pays.length*14;box(L,y,R-L,bh,TINT);
@@ -685,13 +686,15 @@ function paymentsOf(inv){if(inv.payments&&inv.payments.length)return [...inv.pay
   return inv.status==='paid'?[{amount:inv.total,date:inv.paidOn||inv.issueDate,method:'',ref:''}]:[];}
 function paidAmount(inv){return r2(paymentsOf(inv).reduce((s,p)=>s+(Number(p.amount)||0),0));}
 function balanceDue(inv){return Math.max(0,r2(inv.total-paidAmount(inv)));}
+function accountBalance(inv){const same=i=>inv.customerId?i.customerId===inv.customerId:i.customerName===inv.customerName;
+  const list=S.invoices.filter(same);if(!list.some(i=>i.id===inv.id))list.push(inv);return r2(list.reduce((s,i)=>s+balanceDue(i),0));}
 function lastPayDate(inv){const p=paymentsOf(inv);return p.length?p[p.length-1].date:'';}
 function invStatus(inv){if(balanceDue(inv)<=0)return 'paid';if(paidAmount(inv)>0)return inv.dueDate<todayStr()?'overdue':'part';return inv.dueDate<todayStr()?'overdue':'unpaid';}
 const STATUS_LABEL={paid:'Paid',overdue:'Overdue',unpaid:'Unpaid',part:'Part paid'};
 const PAY_METHODS=['Bank transfer','Cash','Card','Cheque','Other'];
 function receiptHref(inv){
-  const st=S.settings,biz=st.businessName||'The Lakes Gardener',first=(inv.customerName||'').split(/[\s&]/)[0],bal=balanceDue(inv),last=paymentsOf(inv).slice(-1)[0];
-  const body=`Hi ${first},\n\nThank you for your payment${last?` of ${gbp(last.amount)} received on ${longDate(last.date)}`:''} for invoice ${inv.number}. Your receipt is attached.\n\n${bal>0?`The remaining balance is ${gbp(bal)}.`:'This invoice is now paid in full.'}\n\nMany thanks,\n${biz}`;
+  const st=S.settings,biz=st.businessName||'The Lakes Gardener',first=(inv.customerName||'').split(/[\s&]/)[0],bal=accountBalance(inv),last=paymentsOf(inv).slice(-1)[0];
+  const body=`Hi ${first},\n\nThank you for your payment${last?` of ${gbp(last.amount)} received on ${longDate(last.date)}`:''} for invoice ${inv.number}. Your receipt is attached.\n\n${bal>0?`Your account balance is now ${gbp(bal)}.`:'Your account is now fully paid up, with a balance of £0.00.'}\n\nMany thanks,\n${biz}`;
   return `mailto:${encodeURIComponent(inv.customerEmail||'')}?subject=${encodeURIComponent(`Receipt for invoice ${inv.number} from ${biz}`)}&body=${encodeURIComponent(body)}`;
 }
 function openPaymentForm(id){
