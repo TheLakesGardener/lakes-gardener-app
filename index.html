@@ -112,6 +112,8 @@ form:not([data-pr="monthly"]) .only-monthly{display:none}
 .dur{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .dur button{font:inherit;font-size:.9rem;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;min-height:40px;cursor:pointer}
 .dur button:hover{border-color:var(--moss)}
+.practice{align-items:flex-start;border:1.5px dashed var(--due);border-radius:12px;padding:10px 12px;font-size:.9rem}.practice input{margin-top:3px}
+.badge.test{color:var(--due);border-color:var(--due)}
 .warnbox{border:1.5px solid var(--due);border-radius:12px;padding:10px 12px;margin-top:12px;font-size:.92rem}
 .totals{margin-top:18px;padding:14px 16px;border-radius:16px;background:var(--surface);border:1px solid var(--line)}
 .totals div{display:flex;justify-content:space-between;gap:12px;padding:3px 0}
@@ -498,7 +500,7 @@ function viewInvoice(){
   const c=S.customers[I.customerId];
   const thisMonth=todayStr().slice(0,7);
   const ready=custs.map(x=>{
-    if(x.pricing==='monthly'){if(x.status==='paused'||S.invoices.some(i=>i.customerId===x.id&&i.contractMonth===thisMonth))return{x,n:0};
+    if(x.pricing==='monthly'){if(x.status==='paused'||S.invoices.some(i=>!i.practice&&i.customerId===x.id&&i.contractMonth===thisMonth))return{x,n:0};
       const mi=monthInfo(thisMonth),vs=S.visits.filter(v=>v.customerId===x.id&&!v.invoiced&&v.date>=mi.start&&v.date<=mi.end);
       return{x,n:1,contract:mi.label,t:(Number(x.monthly)||0)+vs.reduce((s,v)=>s+visitTotals(v).total,0)};}
     const vs=S.visits.filter(v=>v.customerId===x.id&&!v.invoiced);return{x,n:vs.length,t:vs.reduce((s,v)=>s+visitTotals(v).total,0)};}).filter(r=>r.n);
@@ -522,7 +524,8 @@ function viewInvoice(){
   const toMark=chosen.filter(v=>!v.invoiced).length;
   h+=`<p class="muted" style="margin-top:14px">${chosen.length} visit${chosen.length===1?'':'s'}${mins?`, ${fmtMins(mins)}`:''}</p>${draftTotalsHtml(draftInvoice())}${extrasSectionHtml()}
   <details class="f" style="margin-top:14px"><summary>Text summary (for Tide or email)</summary><textarea class="summary" readonly rows="12">${esc(I.text)}</textarea></details>
-  <div class="actions"><button class="btn primary" data-action="create-invoice">Create invoice</button><button class="btn" data-action="copy-summary">Copy summary</button>${toMark?`<button class="btn" data-action="mark-invoiced">Mark ${toMark} as invoiced</button>`:''}</div>`;
+  <label class="check practice"><input type="checkbox" data-change="inv-practice"${S.inv.practice?' checked':''}> <span><strong>Practice run</strong>: stamped TEST, no payment asked for, doesn’t use an invoice number or count towards what you’re owed</span></label>
+  <div class="actions"><button class="btn primary" data-action="create-invoice">${S.inv.practice?'Create practice invoice':'Create invoice'}</button><button class="btn" data-action="copy-summary">Copy summary</button>${toMark?`<button class="btn" data-action="mark-invoiced">Mark ${toMark} as invoiced</button>`:''}</div>`;
   return h;
 }
 function invoiceText(c,visits,from,to){
@@ -612,7 +615,7 @@ function invoicePdf(inv,receipt){
   const img=logoImg();let LW=168,LH=LW*img.h/img.w;if(LH>90){LH=90;LW=LH*img.w/img.h;}
   if(img.blank){LH=34;T(L,64,st.businessName||'Your business',20,true,INK);}
   else c+=`q ${LW.toFixed(2)} 0 0 ${LH.toFixed(2)} ${L} ${(H-40-LH).toFixed(2)} cm /Im1 Do Q\n`;
-  T(R,62,receipt?'RECEIPT':'INVOICE',24,true,GREY,'right');
+  T(R,62,(inv.practice?'TEST ':'')+(receipt?'RECEIPT':'INVOICE'),24,true,inv.practice?'0.7 0.25 0.18':GREY,'right');
   const meta=[['Invoice number',inv.number],['Date issued',longDate(inv.issueDate)],receipt?['Receipt date',longDate(lastPayDate(inv))]:['Payment due',longDate(inv.dueDate)]];
   let my=86;for(const[k,v]of meta){T(R-120,my,k,9,false,MUTED,'right');T(R,my,v,9.5,true,INK,'right');my+=15;}
   let y=Math.max(40+LH+26,my+12);
@@ -634,14 +637,15 @@ function invoicePdf(inv,receipt){
   y+=10;
   T(cols.unit,y+4,'Total',11,true,INK,'right');T(cols.amt,y+4,gbp(inv.total),12,true,INK,'right');
   if(receipt){y+=26;const GREEN='0.16 0.42 0.05',HL='0.89 0.96 0.78';box(cols.qty-30,y-14,R-(cols.qty-30),28,HL);ln(cols.qty-30,y-14,cols.qty-30,y+14,LIME,3);
-    T(cols.unit,y+5,'Amount paid',12,true,GREEN,'right');T(cols.amt,y+5,gbp(paidAmount(inv)),13,true,GREEN,'right');y+=6;
+    T(cols.unit,y+5,inv.practice?'Test amount':'Amount paid',12,true,GREEN,'right');T(cols.amt,y+5,gbp(paidAmount(inv)),13,true,GREEN,'right');y+=6;
     y+=16;T(cols.unit,y+4,'Account balance',10,true,INK,'right');T(cols.amt,y+4,gbp(accountBalance(inv)),10,true,INK,'right');}
   y+=34;
   if(y>H-190){footer();pages.push(c);c='';y=70;}
   if(receipt){const pays=paymentsOf(inv),full=balanceDue(inv)<=0,bh=46+pays.length*14;box(L,y,R-L,bh,TINT);
-    T(L+14,y+18,full?'Paid in full, thank you':'Part payment received, thank you',11,true,INK);
+    T(L+14,y+18,inv.practice?'TEST ONLY: no money has changed hands':full?'Paid in full, thank you':'Part payment received, thank you',11,true,inv.practice?'0.7 0.25 0.18':INK);
     T(L+14,y+33,'Payments received',9,true,MUTED);
     pays.forEach((pm,i)=>{const yy=y+48+i*14;T(L+14,yy,longDate(pm.date),10,false,INK);T(L+150,yy,[pm.method,pm.ref].filter(Boolean).join(', '),10,false,MUTED);T(R-14,yy,gbp(pm.amount),10,true,INK,'right');});}
+  else if(inv.practice){box(L,y,R-L,46,'0.99 0.93 0.88');T(L+14,y+19,'TEST ONLY: no payment required',11,true,'0.7 0.25 0.18');T(L+14,y+35,'This is a trial of our new invoicing system. Please do not pay this invoice.',10,false,INK);}
   else{
     const bank=[['Account name',st.bankName],['Sort code',st.sortCode],['Account number',st.accountNumber],['Reference',inv.number]].filter(r=>r[1]);
     const bh=48+bank.length*14;box(L,y,R-L,bh,TINT);
@@ -675,24 +679,25 @@ async function createInvoice(btn){
   if(!d.contract&&!chosen.length)return toast('Tick at least one visit first.');
   const bad=(S.inv.extras||[]).find(x=>x.name&&x.qty>0&&!(x.price>0));
   if(bad)return toast(`Add a price for “${bad.name}”, or remove that row.`);
-  const st=S.settings,n=Number(st.nextInvoice)||1,today=todayStr();
+  const st=S.settings,practice=!!S.inv.practice,n=Number(st.nextInvoice)||1,today=todayStr();
   const lines=d.lines;
-  const inv={number:`${st.invoicePrefix??'TLG-'}${String(n).padStart(4,'0')}`,customerId:c.id,customerName:c.name,customerAddress:c.address||'',
+  const tn=S.invoices.filter(i=>i.practice).reduce((m,i)=>Math.max(m,parseInt(String(i.number).replace(/\D/g,''),10)||0),0)+1;
+  const inv={number:practice?`TEST-${String(tn).padStart(3,'0')}`:`${st.invoicePrefix??'TLG-'}${String(n).padStart(4,'0')}`,practice,customerId:c.id,customerName:c.name,customerAddress:c.address||'',
     customerEmail:(c.email||'').split(',')[0].trim(),issueDate:today,dueDate:addDays(today,Number(st.paymentDays)||14),lines,
-    total:r2(lines.reduce((s,l)=>s+l.amount,0)),visitIds:chosen.map(v=>v.id),...(d.contract?{contractMonth:d.mi.month}:{}),status:'unpaid',paidOn:null,createdAt:new Date().toISOString()};
+    total:r2(lines.reduce((s,l)=>s+l.amount,0)),visitIds:chosen.map(v=>v.id),...(d.contract&&!practice?{contractMonth:d.mi.month}:{}),status:'unpaid',paidOn:null,createdAt:new Date().toISOString()};
   const id=newId();btn.disabled=true;
   try{
-    await saveSettings({...clone(S.settings),nextInvoice:n+1});
+    if(!practice)await saveSettings({...clone(S.settings),nextInvoice:n+1});
     await store.put('invoices',id,inv);
-    for(const v of chosen){const{id:vid,...rest}=clone(v);await store.put('visits',vid,{...rest,invoiced:true,invoicedOn:today,invoiceId:id});}
-    S.inv.excluded=new Set();S.inv.extras=[];openInvoiceSheet(id,inv);toast(`Invoice ${inv.number} created`);
+    if(!practice)for(const v of chosen){const{id:vid,...rest}=clone(v);await store.put('visits',vid,{...rest,invoiced:true,invoicedOn:today,invoiceId:id});}
+    S.inv.excluded=new Set();S.inv.extras=[];S.inv.practice=false;openInvoiceSheet(id,inv);toast(`Invoice ${inv.number} created`);
   }catch(e){btn.disabled=false;toast('The invoice didn’t save. Check your signal and try again.');}
 }
 function paymentsOf(inv){if(inv.payments&&inv.payments.length)return [...inv.payments].sort((a,b)=>a.date.localeCompare(b.date));
   return inv.status==='paid'?[{amount:inv.total,date:inv.paidOn||inv.issueDate,method:'',ref:''}]:[];}
 function paidAmount(inv){return r2(paymentsOf(inv).reduce((s,p)=>s+(Number(p.amount)||0),0));}
 function balanceDue(inv){return Math.max(0,r2(inv.total-paidAmount(inv)));}
-function accountBalance(inv){const same=i=>inv.customerId?i.customerId===inv.customerId:i.customerName===inv.customerName;
+function accountBalance(inv){if(inv.practice)return balanceDue(inv);const same=i=>!i.practice&&(inv.customerId?i.customerId===inv.customerId:i.customerName===inv.customerName);
   const list=S.invoices.filter(same);if(!list.some(i=>i.id===inv.id))list.push(inv);return r2(list.reduce((s,i)=>s+balanceDue(i),0));}
 function lastPayDate(inv){const p=paymentsOf(inv);return p.length?p[p.length-1].date:'';}
 function invStatus(inv){if(balanceDue(inv)<=0)return 'paid';if(paidAmount(inv)>0)return inv.dueDate<todayStr()?'overdue':'part';return inv.dueDate<todayStr()?'overdue':'unpaid';}
@@ -700,6 +705,8 @@ const STATUS_LABEL={paid:'Paid',overdue:'Overdue',unpaid:'Unpaid',part:'Part pai
 const PAY_METHODS=['Bank transfer','Cash','Card','Cheque','Other'];
 function receiptHref(inv){
   const st=S.settings,biz=st.businessName||'Your business',first=(inv.customerName||'').split(/[\s&]/)[0],bal=accountBalance(inv),last=paymentsOf(inv).slice(-1)[0];
+  if(inv.practice){const body=`Hi ${first},\n\nThis is a TEST receipt from our new invoicing system, to check everything arrives properly. No money has changed hands and nothing is owed.\n\nThe test receipt is attached. Could you let us know it arrived and opened OK?\n\nMany thanks,\n${biz}`;
+    return `mailto:${encodeURIComponent(inv.customerEmail||'')}?subject=${encodeURIComponent(`TEST: receipt ${inv.number} from ${biz} (no payment made)`)}&body=${encodeURIComponent(body)}`;}
   const body=`Hi ${first},\n\nThank you for your payment${last?` of ${gbp(last.amount)} received on ${longDate(last.date)}`:''} for invoice ${inv.number}. Your receipt is attached.\n\n${bal>0?`Your account balance is now ${gbp(bal)}.`:'Your account is now fully paid up, with a balance of £0.00.'}\n\nMany thanks,\n${biz}`;
   return `mailto:${encodeURIComponent(inv.customerEmail||'')}?subject=${encodeURIComponent(`Receipt for invoice ${inv.number} from ${biz}`)}&body=${encodeURIComponent(body)}`;
 }
@@ -709,7 +716,7 @@ function openPaymentForm(id){
   <p class="muted">Invoice ${esc(inv.number)} for ${esc(inv.customerName)}. ${gbp(bal)} still to pay.</p>
   <div class="row2"><label class="f">Amount received (£)<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required value="${bal.toFixed(2)}"></label>
   <label class="f">Date received<input name="date" type="date" required value="${todayStr()}"></label></div>
-  <label class="f">How they paid<select name="method">${PAY_METHODS.map(m=>`<option>${m}</option>`).join('')}</select></label>
+  <label class="f">How they paid<select name="method">${(inv.practice?['Test (no money)',...PAY_METHODS]:PAY_METHODS).map(m=>`<option>${m}</option>`).join('')}</select></label>
   <label class="f">Reference <span class="hint">optional, e.g. the name on their bank transfer</span><input name="ref" autocomplete="off"></label>
   <div class="actions"><button class="btn primary" type="submit">Save payment</button></div></form>`);
 }
@@ -727,6 +734,8 @@ async function savePayment(form){
 function emailHref(inv){
   const st=S.settings,biz=st.businessName||'Your business',first=(inv.customerName||'').split(/[\s&]/)[0];
   const bank=[st.bankName&&`Account name: ${st.bankName}`,st.sortCode&&`Sort code: ${st.sortCode}`,st.accountNumber&&`Account number: ${st.accountNumber}`,`Reference: ${inv.number}`].filter(Boolean).join('\n');
+  if(inv.practice){const body=`Hi ${first},\n\nThis is a TEST invoice from our new invoicing system, to check everything arrives properly. Please don't pay it: no payment is needed.\n\nThe test invoice is attached. Could you let us know it arrived and opened OK?\n\nMany thanks,\n${biz}`;
+    return `mailto:${encodeURIComponent(inv.customerEmail||'')}?subject=${encodeURIComponent(`TEST: invoice ${inv.number} from ${biz} (no payment needed)`)}&body=${encodeURIComponent(body)}`;}
   const body=`Hi ${first},\n\nPlease find attached invoice ${inv.number} for ${gbp(inv.total)}, due by ${longDate(inv.dueDate)}.\n\nYou can pay by bank transfer to:\n${bank}\n\nMany thanks,\n${biz}`;
   return `mailto:${encodeURIComponent(inv.customerEmail||'')}?subject=${encodeURIComponent(`Invoice ${inv.number} from ${biz}`)}&body=${encodeURIComponent(body)}`;
 }
@@ -735,6 +744,7 @@ function openInvoiceSheet(id,fallback){
   const st=invStatus(inv),s=S.settings,missing=!s.bankName||!s.sortCode||!s.accountNumber||!s.address;
   openSheet(`${head(`Invoice ${esc(inv.number)}`)}<div class="detail">
   <p><strong>${esc(inv.customerName)}</strong> <span class="badge${st==='paid'?' ok':st==='overdue'?' bad':''}">${STATUS_LABEL[st]}</span></p>
+  ${inv.practice?'<p class="practice" style="display:block;margin-top:8px"><strong>Practice run.</strong> Emails and PDFs are stamped TEST and ask for no payment.</p>':''}
   <p class="muted">Issued ${longDate(inv.issueDate)}. ${st==='paid'?`Paid in full ${longDate(lastPayDate(inv))}.`:`Due ${longDate(inv.dueDate)}.`}</p></div>
   <div class="totals">${inv.lines.map(l=>`<div><span>${esc(l.desc)}${l.hours?` (${fmtNum(l.qty)} hrs)`:l.qty!==1?` x ${fmtNum(l.qty)}`:''}</span><span>${gbp(l.amount)}</span></div>`).join('')}<div class="grand"><span>Total</span><span>${gbp(inv.total)}</span></div>${paymentsOf(inv).map(p=>`<div class="muted"><span>Paid ${niceDate(p.date,{day:'numeric',month:'short'})}${p.method?`, ${esc(p.method)}`:''}</span><span>−${gbp(p.amount)}</span></div>`).join('')}${paymentsOf(inv).length?`<div><strong>Balance due</strong><strong>${gbp(balanceDue(inv))}</strong></div>`:''}</div>
   ${missing?`<p class="muted" style="margin-top:12px">Your business address or bank details aren’t complete yet. Add them in Settings so they print on the invoice.</p>`:''}
@@ -771,9 +781,9 @@ async function downloadPdf(id,receipt){
 function viewInvoiceList(){
   const list=[...S.invoices].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
   if(!list.length)return `<p class="muted" style="margin-top:16px">No invoices yet. Create one from the New invoice tab.</p>`;
-  const owed=list.reduce((s,i)=>s+balanceDue(i),0);
+  const owed=list.filter(i=>!i.practice).reduce((s,i)=>s+balanceDue(i),0);
   return `<div class="totals"><div class="grand" style="border:0;margin:0;padding-top:0"><span>Outstanding</span><span>${gbp(owed)}</span></div></div>`+
-  list.map(i=>{const st=invStatus(i);return `<button class="item" data-action="open-invoice" data-id="${esc(i.id)}"><span class="item-main"><strong>${esc(i.number)} ${esc(i.customerName)}</strong><span class="item-sub">Issued ${niceDate(i.issueDate,{day:'numeric',month:'short',year:'numeric'})}</span></span><span class="item-end">${gbp(i.total)}<span class="badge${st==='paid'?' ok':st==='overdue'?' bad':''}">${STATUS_LABEL[st]}</span></span></button>`;}).join('');
+  list.map(i=>{const st=invStatus(i);return `<button class="item" data-action="open-invoice" data-id="${esc(i.id)}"><span class="item-main"><strong>${esc(i.number)} ${esc(i.customerName)}</strong><span class="item-sub">Issued ${niceDate(i.issueDate,{day:'numeric',month:'short',year:'numeric'})}</span></span><span class="item-end">${gbp(i.total)}${i.practice?'<span class="badge test">Test</span>':`<span class="badge${st==='paid'?' ok':st==='overdue'?' bad':''}">${STATUS_LABEL[st]}</span>`}</span></button>`;}).join('');
 }
 
 const VIEWS={schedule:viewSchedule,visits:viewVisits,invoice:viewInvoice,customers:viewCustomers,settings:viewSettings};
@@ -1005,13 +1015,14 @@ function extrasSectionHtml(){
 }
 function contractSectionHtml(c){
   const I=S.inv,d=draftInvoice(),mi=d.mi;
-  const done=S.invoices.find(i=>i.customerId===c.id&&i.contractMonth===mi.month);
+  const done=S.invoices.find(i=>!i.practice&&i.customerId===c.id&&i.contractMonth===mi.month);
   const fromVisits=d.visits.filter(v=>(v.materials||[]).length||v.labourType!=='contract').length;
   return `<label class="f">Month<input type="month" data-change="inv-month" value="${mi.month}"></label>
   <p class="muted" style="margin-top:8px">Monthly contract: ${gbp(c.monthly)} a month. Visits don’t need ticking off${fromVisits?`; extras logged on ${fromVisits} visit${fromVisits===1?'':'s'} this month are added automatically`:''}.</p>
   ${done?`<div class="warnbox">${esc(mi.label)} has already been invoiced (${esc(done.number)}). Creating another will bill this month again.</div>`:''}
   ${draftTotalsHtml(d)}${extrasSectionHtml()}
-  <div class="actions"><button class="btn primary" data-action="create-invoice">Create ${esc(mi.label)} invoice</button></div>`;
+  <label class="check practice"><input type="checkbox" data-change="inv-practice"${S.inv.practice?' checked':''}> <span><strong>Practice run</strong>: stamped TEST, no payment asked for, doesn’t use an invoice number or count towards what you’re owed</span></label>
+  <div class="actions"><button class="btn primary" data-action="create-invoice">${S.inv.practice?'Create practice invoice':`Create ${esc(mi.label)} invoice`}</button></div>`;
 }
 
 function matRow(m){m=m||{name:'',qty:1,price:''};
@@ -1173,6 +1184,7 @@ document.addEventListener('change',e=>{
     f.elements.rate.value=c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate;f.elements.fixedPrice.value=c.price??'';updateVisitCalc(f);return;}
   if(k==='inv-customer'){I.customerId=t.value;I.from=null;I.to=null;I.excluded=new Set();I.extras=[];I.month=null;}
   else if(k==='inv-month'){if(t.value)I.month=t.value;}
+  else if(k==='inv-practice'){I.practice=t.checked;}
   else if(k==='inv-from'){if(t.value)I.from=t.value;}
   else if(k==='inv-to'){if(t.value)I.to=t.value;}
   else if(k==='inv-show')I.showInvoiced=t.checked;
