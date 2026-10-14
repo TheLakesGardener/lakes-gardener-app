@@ -6,23 +6,16 @@
 <title>Gardening app</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Lato:wght@700;900&display=swap" rel="stylesheet">
-<meta name="theme-color" content="#0070E0">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#F2F7F8">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js" integrity="sha256-/anWf4DM5AdPeNY3O7E26Ew0yyNbipHF5ChAaNpt3EI=" crossorigin="anonymous"></script>
 <style>
 :root{
-  --bg:#F7F9F4;--surface:#FFFFFF;--surface-2:#F2F5EE;--ink:#2F3330;--muted:#5C615D;--line:#DCE2D6;--moss:#0070E0;--on-moss:#FFFFFF;--fern:#5A8500;--lime:#AED921;--due:#8A6D08;--over:#B3412F;--word:#565656;
+  --bg:#F2F7F8;--surface:#FFFFFF;--surface-2:#E8F1F3;--ink:#0F2328;--muted:#4B646C;--line:#DCE7EA;--moss:#0B6672;--on-moss:#FFFFFF;--tint:#DDF0F2;--fern:#2F7D4F;--lime:#F2B544;--due:#8A5A00;--over:#B42318;--word:#0F2328;
+  --display:"Bricolage Grotesque","Figtree",system-ui,sans-serif;
   box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light;
-}
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --bg:#121416;--surface:#1B1F22;--surface-2:#22272B;--ink:#E7EAE8;--muted:#A2A8A4;--line:#30363A;--moss:#4DA3FF;--on-moss:#04172B;--fern:#B7E03C;--lime:#AED921;--due:#D9B64A;--over:#E68A73;--word:#D6D8D6;color-scheme:dark;
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#121416;--surface:#1B1F22;--surface-2:#22272B;--ink:#E7EAE8;--muted:#A2A8A4;--line:#30363A;--moss:#4DA3FF;--on-moss:#04172B;--fern:#B7E03C;--lime:#AED921;--due:#D9B64A;--over:#E68A73;--word:#D6D8D6;color-scheme:dark;
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *,*::before,*::after{box-sizing:inherit}
@@ -188,6 +181,64 @@ form:not([data-pr="monthly"]) .only-monthly{display:none}
 .login{max-width:420px;margin:40px auto 0}.login h2{font-size:1.6rem;margin-bottom:8px}.login p{color:var(--muted);margin-bottom:10px}
 body.signed-out .tabs{display:none}
 @media (max-width:380px){.row3{grid-template-columns:1fr 1fr}.row3 label:last-child{grid-column:span 2}}
+/* ---------- new look (Harbour, light) ---------- */
+body{font-family:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;padding-bottom:96px}
+h1,h2,h3,.page-title,.cal-title,.round-head h2,.sheet-head h2,.empty h2,.login h2{font-family:var(--display);letter-spacing:-.02em}
+.page-title{font-size:1.75rem}
+.round-head h2,.cal-title{font-size:1.8rem}
+.top{padding:16px 16px 10px}
+.top h1{font-family:var(--display);font-size:1.15rem;letter-spacing:-.01em;text-transform:none;color:var(--ink)}
+.brand img{max-height:48px}
+.btn{border-radius:14px;min-height:48px;padding:10px 18px;border:1.5px solid var(--line);color:var(--ink);background:var(--surface)}
+.btn:hover{border-color:var(--moss)}
+.btn.primary{background:var(--moss);border-color:var(--moss);color:var(--on-moss)}
+.btn.primary:hover{background:#09545E;border-color:#09545E}
+.btn.small{min-height:40px;border-radius:12px;padding:6px 14px}
+.btn.warn{border-color:#F1C7C2;color:var(--over);background:var(--surface)}
+.btn.light{border-color:rgba(255,255,255,.6);color:var(--on-moss);background:transparent}
+:focus-visible{outline:3px solid var(--lime);outline-offset:2px}
+.timer{border-radius:16px;padding:12px 10px 12px 16px}
+.seg-btns{background:var(--surface-2);padding:4px;border-radius:12px;gap:4px;display:inline-flex}
+.seg-btns button{border:0;border-radius:9px;min-height:38px}
+.seg-btns button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(15,35,40,.12)}
+.stop{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:14px;margin-top:10px}
+.lawn{fill:var(--moss)}
+.stop h3{font-family:var(--display);font-size:1.2rem}
+.group>h2{font-family:"Figtree",sans-serif;font-size:.8rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;margin-top:22px}
+.item{padding:13px 4px}
+.item.on{background:var(--tint);border-radius:12px;padding:13px 10px}
+.badge{border:0;background:var(--surface-2);color:var(--muted);padding:3px 10px}
+.badge.ok{background:#E2F2E8;color:var(--fern)}
+.badge.bad{background:#FDE7E4;color:var(--over)}
+.badge.test{background:#FFF1D6;color:var(--due)}
+input,select,textarea{border-radius:12px;border-color:var(--line);min-height:48px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--moss);box-shadow:0 0 0 3px var(--tint)}
+.chip span{border-color:var(--line)}
+.dur button{border-radius:12px}
+.totals{border-radius:18px;padding:16px 18px}
+.totals .grand{font-family:var(--display)}
+.appt{border-radius:12px;border-left-width:4px}
+.appt.completed{border-left-color:var(--fern)}.appt.completed .flag{color:var(--fern)}
+.appt.extra{border-left-color:var(--lime)}
+.mdot.completed{background:var(--fern)}.mdot.extra{background:var(--lime)}
+.mname.completed{border-color:var(--fern)}
+.mcell{background:var(--surface)}
+.month-grid{border-radius:14px;overflow:hidden}
+@media (min-width:980px){main.wide .day{background:var(--surface);border-radius:14px}main.wide .day.today{border-color:var(--moss)}}
+.alert{border-radius:16px;background:#FFF6F5;border-color:#F1C7C2}
+.warnbox{background:#FFF8E8;border-color:#F2D48A}
+.practice{background:#FFF8E8;border-color:#E9B949}
+#note{border-radius:12px}
+.tabs{background:var(--surface);box-shadow:0 -1px 0 var(--line)}
+.tabs button{font-size:.72rem;font-weight:500;gap:3px}
+.tabs button svg{width:22px;height:22px;padding:4px 14px;box-sizing:content-box;border-radius:999px}
+.tabs button[aria-current="page"]{color:var(--moss)}
+.tabs button[aria-current="page"] svg{background:var(--tint)}
+.sheet-back{background:rgba(15,35,40,.45)}
+.sheet-panel{border-radius:24px 24px 0 0}
+.picker{border-radius:14px;box-shadow:0 12px 32px rgba(15,35,40,.18)}
+.picker button:hover,.picker button[aria-selected="true"]{background:var(--tint)}
+#toast{border-radius:14px}
 </style>
 </head>
 <body>
