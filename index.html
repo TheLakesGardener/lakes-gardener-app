@@ -93,6 +93,8 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .hm-field{margin-top:14px}
 .part-row{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 10px;margin-top:8px}
 .pr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
+.pr-charge{margin:8px 0 2px;font-size:.88rem;color:var(--muted);font-weight:600}
+.charge{margin-top:12px}
 .part-item{margin:2px 0 6px;grid-template-columns:1fr 1fr}
 .part-item .pick-wrap{grid-column:1/-1}
 .part-item>span{display:none}
@@ -326,7 +328,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-6';let updateWaiting=null;
+const APP_VERSION='2026-10-15-7';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -531,16 +533,30 @@ function openOccurrence(key){
   ${addr?`<p>${esc(addr)}<br><a href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(addr)}" target="_blank" rel="noopener">Directions</a></p>`:''}
   ${phone?`<p><a href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a></p>`:''}
   ${(c.tasks||[]).length?`<p><span class="muted">Usual jobs:</span> ${esc(c.tasks.join(', '))}</p>`:''}
+  ${o.status==='completed'&&o.visitId?(()=>{const v=S.visits.find(x=>x.id===o.visitId);if(!v)return '';const t=visitTotals(v);
+      return `<div class="totals charge"><div><span>${v.labourType==='contract'?`Labour: ${fmtMins(t.mins)}, in contract`:v.labourType==='fixed'?'Fixed price':`Labour: ${fmtMins(t.mins)} × ${gbp(v.rate)}/hr`}</span><span>${gbp(t.labour)}</span></div>${t.materials?`<div><span>Extras</span><span>${gbp(t.materials)}</span></div>`:''}<div class="grand"><span>Charged for this visit</span><span>${gbp(t.total)}</span></div></div>`;})()
+    :o.status!=='skipped'?chargeHtml(chargeFor(o.customerId,o.duration,o.items||[]),'Expected charge'):''}
   ${o.partOf?`<p><span class="muted">This visit is for:</span> ${esc(o.task||'Main job')}</p>`:''}
   ${partList.length?`<p><span class="muted">This job:</span> ${partList.map(x=>`<button class="linkbtn" data-action="open-occ" data-key="${esc(x.k)}">${esc(x.label)} ${shortDate(x.date)}</button>`).join(', ')}</p>`:''}
   ${o.notes?`<p><span class="muted">Visit note:</span> ${esc(o.notes)}</p>`:''}
-  ${(o.items||[]).length?`<div class="totals" style="margin-top:10px">${o.items.map(m=>`<div><span>${esc(m.name)}${m.qty!==1?` x ${fmtNum(m.qty)}`:''}</span><span>${m.price?gbp(r2(m.qty*m.price)):'price on the day'}</span></div>`).join('')}<div class="grand"><span>Line items for this visit</span><span>${gbp(itemsTotal(o.items))}</span></div></div>`:''}
+
   ${c.notes?`<p><span class="muted">Customer notes:</span> ${esc(c.notes)}</p>`:''}
   </div><div class="actions">${act}<button class="btn" data-action="edit-customer" data-id="${esc(o.customerId)}">Customer details</button></div>`);
 }
 function jobParts(key){return S.schedule.filter(e=>e.kind==='extra'&&e.partOf===key).sort((a,b)=>(a.part||0)-(b.part||0)||a.date.localeCompare(b.date));}
 function jobDate(key){if(!key)return '';if(key.startsWith('r:'))return key.split(':')[2];const e=S.schedule.find(x=>x.id===key.slice(2));return e?e.date:'';}
 const shortDate=d=>niceDate(d,{weekday:'short',day:'numeric',month:'short'});
+function rateFor(c){return Number(c&&c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate)||0;}
+function chargeFor(cid,mins,items,mainOnly){
+  const c=S.customers[cid]||{},lt=ltFor(c),rows=[];let warn='';
+  if(lt==='contract')rows.push([`Labour: ${fmtMins(mins)}, included in monthly contract`,0]);
+  else if(lt==='fixed')rows.push([`Fixed price for the visit`,Number(c.price)||0]);
+  else{const r=rateFor(c);if(!r)warn=`No hourly rate set for ${c.name||'this customer'}. Add one on the customer or in Settings, or this visit will charge £0.`;
+    rows.push([`Labour: ${fmtMins(mins)} × ${gbp(r)}/hr`,r2(mins/60*r)]);}
+  for(const m of items||[])rows.push([`${m.name}${(Number(m.qty)||0)!==1?` × ${fmtNum(m.qty)}`:''}${m.price?` @ ${gbp(m.price)}`:''}`,r2((Number(m.qty)||0)*(Number(m.price)||0))]);
+  return{rows,total:r2(rows.reduce((t,r)=>t+r[1],0)),warn};
+}
+function chargeHtml(ch,title){return `${ch.warn?`<div class="warnbox">${esc(ch.warn)}</div>`:''}<div class="totals charge">${ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}<div class="grand"><span>${title||'Charge for this visit'}</span><span>${gbp(ch.total)}</span></div></div>`;}
 function itemsTotal(items){return r2((items||[]).reduce((t,m)=>t+(Number(m.qty)||0)*(Number(m.price)||0),0));}
 function readItems(box){return [...box.querySelectorAll('.mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||0,price:parseFloat(r.querySelector('[name=mprice]').value)||0})).filter(m=>m.name);}
 function saveNewHtml(){return `<label class="save-new"><input type="checkbox" name="saveNew" checked> Save new items to my list as <select name="saveAs" aria-label="Save as"><option value="services">services</option><option value="materials">products</option></select></label>`;}
@@ -555,7 +571,7 @@ async function saveNewItems(form,items){
 function partRow(x){const d=x.duration||60;
   return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
   ${x.fixed?'':`<div class="mat-row part-item"><div class="pick-wrap"><input name="mname" autocomplete="off" placeholder="Main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${x.done?' disabled':''}></div><input name="mqty" type="number" inputmode="decimal" min="0" step="any" value="${esc(x.qty||1)}" aria-label="Quantity"${x.done?' disabled':''}><input name="mprice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="£ price" value="${esc(x.price||'')}" aria-label="Price"${x.done?' disabled':''}><span></span></div>`}
-  ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`<div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${x.done?' disabled':''}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${x.done?' disabled':''}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${x.done?' disabled':''}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${x.done?' disabled':''}><span>m</span></span></div>`}</div>`;}
+  ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`<div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${x.done?' disabled':''}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${x.done?' disabled':''}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${x.done?' disabled':''}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${x.done?' disabled':''}><span>m</span></span></div><p class="pr-charge"></p>`}</div>`;}
 function partsSectionHtml(o){
   const root=o.partOf||o.key,rows=[];
   if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Started',date:r.date,start:r.start,fixed:true});}
@@ -582,7 +598,15 @@ async function saveParts(form,cid){
       if(t.price)next.services=[...(next.services||[]),{name:t.name,price:t.price}];else next.tasks=[...(next.tasks||[]),t.name];}
     if(changed)await saveSettings(next);}
 }
-function updateApptSum(form){const el=$('#apptSum');if(!el)return;const it=readItems($('#apptRows')||form);el.textContent=it.length?`Line items: ${gbp(itemsTotal(it))}`:'';}
+function updateApptSum(form){
+  const cid=form.elements.customerId&&form.elements.customerId.value;
+  const el=$('#apptSum');if(el){const it=readItems($('#apptRows')||form);el.innerHTML=cid?chargeHtml(chargeFor(cid,Number(form.elements.duration.value)||0,it)):'';}
+  form.querySelectorAll('.part-row').forEach(r=>{const out=r.querySelector('.pr-charge');if(!out)return;
+    const dur=(parseInt(r.querySelector('[name=ph]').value,10)||0)*60+(parseInt(r.querySelector('[name=pm]').value,10)||0);
+    const t=(r.querySelector('[name=mname]').value||'').trim(),pr=parseFloat(r.querySelector('[name=mprice]').value)||0,q=parseFloat(r.querySelector('[name=mqty]').value)||1;
+    const ch=chargeFor(cid,dur,t&&pr&&!/^main job/i.test(t)?[{name:t,qty:q,price:pr}]:[]);
+    out.textContent=`${ch.rows.map(x=>`${x[0]} = ${gbp(x[1])}`).join(' + ')}${ch.rows.length>1?`; total ${gbp(ch.total)}`:''}`;});
+}
 function openApptForm(p){
   const custs=sortedCustomers();if(!custs.length){toast('Add a customer first.');return openCustomerForm();}
   const o=p.key?findOcc(p.key):null,pf=p.partOf?findOcc(p.partOf):null;
@@ -600,7 +624,7 @@ function openApptForm(p){
   <div class="row2"><label class="f">Start <span class="hint">optional</span><input type="time" name="start" value="${esc(start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(start?addMins(start,dur):'')}"></label></div>
   ${hmBox('duration',dur,'Length','finish works this out')}
   <fieldset class="f"><legend>Line items for this visit <span class="hint">e.g. weed spraying, plants; added to the visit when you log it</span></legend><div id="apptRows">${items.map(matRow).join('')}</div>
-  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-item">+ Add line item</button></div><div class="items-sum" id="apptSum"></div>${saveNewHtml()}</fieldset>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-item">+ Add line item</button></div><div id="apptSum"></div>${saveNewHtml()}</fieldset>
   ${o?partsSectionHtml(o):''}
   <label class="f">Note for this visit<textarea name="notes" rows="2">${esc(o&&o.notes||'')}</textarea></label>
   ${o||pf?'':`<p class="muted" style="margin-top:10px">For one-off and extra visits. Regular visits appear automatically from each customer’s schedule.</p>`}
@@ -934,7 +958,7 @@ function openInvoiceSheet(id,fallback){
   <p><strong>${esc(inv.customerName)}</strong> <span class="badge${st==='paid'?' ok':st==='overdue'?' bad':''}">${STATUS_LABEL[st]}</span></p>
   ${inv.practice?'<p class="practice" style="display:block;margin-top:8px"><strong>Practice run.</strong> Emails and PDFs are stamped TEST and ask for no payment.</p>':''}
   <p class="muted">Issued ${longDate(inv.issueDate)}. ${st==='paid'?`Paid in full ${longDate(lastPayDate(inv))}.`:`Due ${longDate(inv.dueDate)}.`}</p></div>
-  <div class="totals">${inv.lines.map(l=>`<div><span>${esc(l.desc)}${l.hours?` (${fmtNum(l.qty)} hrs)`:l.qty!==1?` x ${fmtNum(l.qty)}`:''}</span><span>${gbp(l.amount)}</span></div>`).join('')}<div class="grand"><span>Total</span><span>${gbp(inv.total)}</span></div>${paymentsOf(inv).map(p=>`<div class="muted"><span>Paid ${niceDate(p.date,{day:'numeric',month:'short'})}${p.method?`, ${esc(p.method)}`:''}</span><span>−${gbp(p.amount)}</span></div>`).join('')}${paymentsOf(inv).length?`<div><strong>Balance due</strong><strong>${gbp(balanceDue(inv))}</strong></div>`:''}</div>
+  <div class="totals">${inv.lines.map(l=>`<div><span>${esc(l.desc)}${l.hours?` (${fmtNum(l.qty)} hrs × ${gbp(l.unit)}/hr)`:l.qty!==1?` (${fmtNum(l.qty)} × ${gbp(l.unit)})`:''}</span><span>${gbp(l.amount)}</span></div>`).join('')}<div class="grand"><span>Total</span><span>${gbp(inv.total)}</span></div>${paymentsOf(inv).map(p=>`<div class="muted"><span>Paid ${niceDate(p.date,{day:'numeric',month:'short'})}${p.method?`, ${esc(p.method)}`:''}</span><span>−${gbp(p.amount)}</span></div>`).join('')}${paymentsOf(inv).length?`<div><strong>Balance due</strong><strong>${gbp(balanceDue(inv))}</strong></div>`:''}</div>
   ${missing?`<p class="muted" style="margin-top:12px">Your business address or bank details aren’t complete yet. Add them in Settings so they print on the invoice.</p>`:''}
   <div class="actions"><button class="btn primary" data-action="inv-pdf" data-id="${esc(id)}">Download invoice PDF</button>
   ${inv.customerEmail&&st!=='paid'?`<button class="btn" data-action="inv-send" data-id="${esc(id)}">Send invoice</button>`:''}
@@ -1143,7 +1167,7 @@ function openPicker(input){
   let html='',g='';
   items.forEach((x,i)=>{if(x.group!==g){g=x.group;html+=`<h4>${esc(g)}</h4>`;}
     html+=`<button type="button" role="option" data-pick="${i}" aria-selected="${i===0&&q?'true':'false'}"><span>${esc(x.name)}</span><span>${x.price?gbp(x.price):'price on the day'}</span></button>`;});
-  if(!items.length)html=`<div class="none">Nothing matches. Keep typing to add “${esc(input.value.trim())}” as a one-off.</div>`;
+  if(!items.length)html=`<div class="none">${inPart?`New task: “${esc(input.value.trim())}” will be saved to your list.`:`Nothing matches. Keep typing to add “${esc(input.value.trim())}” as a one-off.`}</div>`;
   if(!q)html+=`<div class="none">${inPart?'Or type a new task; it’s saved to your list.':`Type to search ${catalogue().length} products and services.`}</div>`;
   panel.innerHTML=html;panel.hidden=false;input.setAttribute('aria-expanded','true');
   pickState={input,items,idx:q&&items.length?0:-1};
@@ -1154,7 +1178,7 @@ function choosePick(i){
   const row=input.closest('.mat-row');input.value=x.name;
   const p=row.querySelector('[name=mprice]');if(x.price)p.value=x.price;else if(!p.value)p.value='';
   closePicker();afterRowChange(input);
-  if(row.classList.contains('part-item')){input.blur();return;}
+  if(row.classList.contains('part-item')){input.blur();updateApptSum(input.closest('form'));return;}
   const next=x.price?row.querySelector('[name=mqty]'):p;next.focus();next.select&&next.select();
 }
 function afterRowChange(el){
@@ -1200,7 +1224,7 @@ function draftInvoice(){
   return{c,visits,lines,contract:false,total:r2(lines.reduce((s,l)=>s+l.amount,0))};
 }
 function draftTotalsHtml(d){
-  return `<div class="totals" id="invTotals">${d.lines.map(l=>`<div><span>${esc(l.desc)}${l.hours?` (${fmtNum(l.qty)} hrs)`:l.qty!==1?` x ${fmtNum(l.qty)}`:''}</span><span>${gbp(l.amount)}</span></div>`).join('')}<div class="grand"><span>Total</span><span>${gbp(d.total)}</span></div></div>`;
+  return `<div class="totals" id="invTotals">${d.lines.map(l=>`<div><span>${esc(l.desc)}${l.hours?` (${fmtNum(l.qty)} hrs × ${gbp(l.unit)}/hr)`:l.qty!==1?` (${fmtNum(l.qty)} × ${gbp(l.unit)})`:''}</span><span>${gbp(l.amount)}</span></div>`).join('')}<div class="grand"><span>Total</span><span>${gbp(d.total)}</span></div></div>`;
 }
 function extrasSectionHtml(){
   const rows=(S.inv.extras||[]).map(matRow).join('');
@@ -1240,7 +1264,8 @@ function updateVisitCalc(form,target){
   const el=form.elements;
   if(target)timeLink(form,target,'minutes');
   const v=readVisit(form),t=visitTotals(v);form.dataset.lt=v.labourType;
-  $('#vfTotals').innerHTML=`<div><span>Labour${v.labourType==='contract'?' (included in monthly contract)':''}${v.labourType==='hourly'&&t.mins?` (${fmtMins(t.mins)} at ${gbp(v.rate)} an hour)`:''}</span><span>${gbp(t.labour)}</span></div><div><span>Extras</span><span>${gbp(t.materials)}</span></div><div class="grand"><span>Total</span><span>${gbp(t.total)}</span></div>`;
+  $('#vfTotals').innerHTML=`<div><span>Labour${v.labourType==='contract'?' (included in monthly contract)':''}${v.labourType==='hourly'?` (${fmtMins(t.mins)} × ${gbp(v.rate)}/hr)`:''}</span><span>${gbp(t.labour)}</span></div><div><span>Extras</span><span>${gbp(t.materials)}</span></div><div class="grand"><span>Total</span><span>${gbp(t.total)}</span></div>`;
+  if(v.labourType==='hourly'&&!(Number(v.rate)>0))$('#vfTotals').insertAdjacentHTML('afterbegin',`<div class="warnbox" style="display:block">No hourly rate set, so the labour will charge £0. Add the rate below.</div>`);
 }
 async function saveVisit(form){
   const v=readVisit(form);
@@ -1315,7 +1340,7 @@ document.addEventListener('click',async e=>{
       if(el.start.value)el.end.value=addMins(el.start.value,m);
       else if(f.id==='visitForm'){const d=new Date(),nowM=Math.floor((d.getHours()*60+d.getMinutes())/5)*5;el.end.value=`${pad(Math.floor(nowM/60))}:${pad(nowM%60)}`;el.start.value=addMins(el.end.value,-m);}
       setDur(f,dn,m);if(!a.dataset.add)f.querySelectorAll('[data-action=dur]').forEach(x=>x.setAttribute('aria-pressed',x===a?'true':'false'));
-      if(f.id==='visitForm')updateVisitCalc(f);break;}
+      if(f.id==='visitForm')updateVisitCalc(f);if(f.id==='apptForm')updateApptSum(f);break;}
     case 'start-timer':
       try{await saveSettings({...clone(S.settings),timer:{customerId:id,start:new Date().toISOString(),scheduledKey:a.dataset.key||''}});closeSheet();toast('Timer started');}catch(err){toast('The timer didn’t start. Try again.');}
       break;
@@ -1366,8 +1391,8 @@ document.addEventListener('click',async e=>{
       const last=[...box.querySelectorAll('[name=pdate]')].map(x=>x.value).filter(Boolean).sort().pop()||f.elements.date.value||todayStr();
       let d=addDays(last,1);if(d<=todayStr())d=addDays(todayStr(),1);
       const left=Math.max(30,(readDur(f,'duration')||60)-(f.elements.start.value&&f.elements.end.value?0:0));
-      box.insertAdjacentHTML('beforeend',partRow({label:`Part ${n}`,date:d,start:'',duration:Math.min(left,120)}));break;}
-    case 'part-remove':{const r=a.closest('.part-row'),f=r.closest('form');if(r.dataset.id)f.dataset.removed=((f.dataset.removed||'')+','+r.dataset.id);r.remove();break;}
+      box.insertAdjacentHTML('beforeend',partRow({label:`Part ${n}`,date:d,start:'',duration:Math.min(left,120)}));updateApptSum(f);break;}
+    case 'part-remove':{const r=a.closest('.part-row'),f=r.closest('form');if(r.dataset.id)f.dataset.removed=((f.dataset.removed||'')+','+r.dataset.id);r.remove();updateApptSum(f);break;}
     case 'add-part':{const o=findOcc(a.dataset.key);if(!o)break;openApptForm({partOf:o.partOf||o.key});break;}
     case 'log-occ':{const o=findOcc(a.dataset.key);if(!o)break;closeSheet();
       openVisitForm({customerId:o.customerId,date:o.date>todayStr()?todayStr():o.date,start:o.start,end:o.start?addMins(o.start,o.duration):'',scheduledKey:o.key,materials:o.items,partOf:o.partOf||''});break;}
@@ -1391,6 +1416,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('change',e=>{
   const t=e.target,k=t.dataset.change,I=S.inv;
+  if(t.closest&&t.closest('#apptForm'))updateApptSum(t.closest('#apptForm'));
   if(t.name==='mname'){const m=catalogue().find(x=>x.name.toLowerCase()===t.value.trim().toLowerCase());const p=t.closest('.mat-row').querySelector('[name=mprice]');if(m&&!p.value&&m.price)p.value=m.price;afterRowChange(t);}
   if(!k)return;
   if(k==='logo-file'){const f=t.files&&t.files[0];if(f)setLogo(f);return;}
