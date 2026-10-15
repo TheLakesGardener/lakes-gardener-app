@@ -331,7 +331,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-10';let updateWaiting=null;
+const APP_VERSION='2026-10-15-11';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -523,10 +523,9 @@ function openOccurrence(key){
   const st={completed:'Visit logged',missed:'Not logged yet',skipped:'Skipped',scheduled:'Scheduled'}[o.status];
   const addr=c.address?c.address.replace(/\s*\n\s*/g,', '):'',phone=(c.phone||'').split(',')[0].trim();
   let act;
-  if(o.status==='completed')act=`<button class="btn primary" data-action="edit-visit" data-id="${esc(o.visitId)}">View visit</button>`;
+  if(o.status==='completed')act=`<button class="btn primary" data-action="move-occ" data-key="${esc(key)}">Edit visit</button>`;
   else if(o.status==='skipped')act=`<button class="btn" data-action="restore-occ" data-key="${esc(key)}">Put back on schedule</button>`;
-  else act=`<button class="btn primary" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
-  if(o.status==='completed')act+=`<button class="btn" data-action="add-part" data-key="${esc(key)}">+ Visit to finish the job</button>`;
+  else act=`<button class="btn primary" data-action="quick-done" data-key="${esc(key)}">✓ Mark as done</button><button class="btn" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
   const parts=jobParts(o.partOf||key).filter(e=>`x:${e.id}`!==key);
   const root=o.partOf&&o.partOf!==key?[{label:'Started',date:jobDate(o.partOf),k:o.partOf}]:[];
   const partList=[...root,...parts.map(e=>({label:`Part ${e.part||2}`,date:e.date,k:`x:${e.id}`}))];
@@ -548,11 +547,11 @@ function jobParts(key){return S.schedule.filter(e=>e.kind==='extra'&&e.partOf===
 function jobDate(key){if(!key)return '';if(key.startsWith('r:'))return key.split(':')[2];const e=S.schedule.find(x=>x.id===key.slice(2));return e?e.date:'';}
 const shortDate=d=>niceDate(d,{weekday:'short',day:'numeric',month:'short'});
 function rateFor(c){return Number(c&&c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate)||0;}
-function chargeFor(cid,mins,items,mainOnly){
-  const c=S.customers[cid]||{},lt=ltFor(c),rows=[];let warn='';
+function chargeFor(cid,mins,items,ov){
+  const c=S.customers[cid]||{},lt=ov?ov.labourType:ltFor(c),rows=[];let warn='';
   if(lt==='contract')rows.push([`Labour: ${fmtMins(mins)}, included in monthly contract`,0]);
-  else if(lt==='fixed')rows.push([`Fixed price for the visit`,Number(c.price)||0]);
-  else{const r=rateFor(c);if(!r)warn=`No hourly rate set for ${c.name||'this customer'}. Add one on the customer or in Settings, or this visit will charge £0.`;
+  else if(lt==='fixed')rows.push([`Fixed price for the visit`,Number(ov?ov.fixedPrice:c.price)||0]);
+  else{const r=ov?Number(ov.rate)||0:rateFor(c);if(!r)warn=`No hourly rate set for ${c.name||'this customer'}. Add one on the customer or in Settings, or this visit will charge £0.`;
     rows.push([`Labour: ${fmtMins(mins)} × ${gbp(r)}/hr`,r2(mins/60*r)]);}
   for(const m of items||[])rows.push([`${m.name}${(Number(m.qty)||0)!==1?` × ${fmtNum(m.qty)}`:''}${m.price?` @ ${gbp(m.price)}`:''}`,r2((Number(m.qty)||0)*(Number(m.price)||0))]);
   return{rows,total:r2(rows.reduce((t,r)=>t+r[1],0)),warn};
@@ -622,7 +621,8 @@ async function saveParts(form,cid){
 }
 function updateApptSum(form){
   const cid=form.elements.customerId&&form.elements.customerId.value;if(!cid)return;
-  const main=chargeFor(cid,Number(form.elements.duration.value)||0,readItems($('#apptRows')||form));
+  const lv=form.dataset.vid?S.visits.find(x=>x.id===form.dataset.vid):null;
+  const main=chargeFor(cid,Number(form.elements.duration.value)||0,readItems($('#apptRows')||form),lv||null);
   const parts=[];
   const known=new Set(catalogue().map(x=>x.name.toLowerCase()));
   form.querySelectorAll('.part-row').forEach(r=>{const out=r.querySelector('.pr-charge');if(!out)return;const pt=readPart(r),ch=chargeFor(cid,pt.dur,pt.items);
@@ -637,6 +637,10 @@ function updateApptSum(form){
     ${parts.map(p=>`<div class="sub-h"><span>${esc(p.label)}</span></div>${p.ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}`).join('')}
     <div class="grand"><span>Job total</span><span>${gbp(total)}</span></div></div>`;
 }
+function makeVisit(o,f){const c=S.customers[o.customerId]||{};
+  return{customerId:o.customerId,date:f.date,start:f.start||'',end:f.start?addMins(f.start,f.duration):'',minutes:f.duration,tasks:o.task?[o.task]:(c.tasks||[]).slice(),materials:f.items||[],
+    labourType:ltFor(c),rate:c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate,fixedPrice:c.price??'',notes:f.notes||'',invoiced:false,invoicedOn:null,
+    scheduledKey:o.key,partOf:o.partOf||'',createdAt:new Date().toISOString()};}
 function openApptForm(p){
   const custs=sortedCustomers();if(!custs.length){toast('Add a customer first.');return openCustomerForm();}
   const o=p.key?findOcc(p.key):null,pf=p.partOf?findOcc(p.partOf):null;
@@ -644,9 +648,12 @@ function openApptForm(p){
   let date=o?o.date:(p.date||todayStr()),start=o?o.start:(c.startTime||''),dur=o?o.duration:(c.duration||60);
   if(pf){const done=S.visits.filter(v=>v.scheduledKey===p.partOf||v.partOf===p.partOf).reduce((t,v)=>t+(Number(v.minutes)||0),0);
     dur=Math.max(30,(pf.duration||60)-done);start='';const t=addDays(todayStr(),1),d1=addDays(pf.date,1);date=d1>t?d1:t;}
-  const items=o&&o.items||[];
+  let items=o&&o.items||[],notes=o&&o.notes||'';
+  const lv=o&&o.visitId?S.visits.find(x=>x.id===o.visitId):null;
+  if(lv){date=lv.date;start=lv.start||'';dur=Number(lv.minutes)||dur;items=lv.materials||[];notes=lv.notes||'';}
   const partNo=pf?jobParts(p.partOf).length+2:0;
-  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}" data-part-of="${esc(p.partOf||'')}" data-part="${partNo}">${head(o?'Edit or reschedule visit':pf?'Add a visit to finish the job':'Schedule a visit')}
+  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}" data-vid="${esc(lv?lv.id:'')}" data-part-of="${esc(p.partOf||'')}" data-part="${partNo}">${head(lv?'Edit visit':o?'Edit or reschedule visit':pf?'Add a visit to finish the job':'Schedule a visit')}
+  ${lv?`<p class="muted" style="margin-top:4px">Logged ✓${lv.invoiced?' and invoiced':''}. Changes here update the logged visit.</p>`:''}
   ${pf?`<p class="muted" style="margin-top:4px">Part ${partNo} of ${esc(c.name||'')}’s job from ${shortDate(pf.date)}. The regular schedule stays the same, and on the invoice the hours are added to that job.</p>`:''}
   <label class="f">Customer</label>${custPick('customerId',cid,'',!!o||!!pf)}
   <label class="f">Date<input type="date" name="date" required value="${esc(date)}"></label>
@@ -656,11 +663,11 @@ function openApptForm(p){
   <fieldset class="f"><legend>Line items for this visit <span class="hint">e.g. weed spraying, plants; added to the visit when you log it</span></legend><div id="apptRows">${items.map(matRow).join('')}</div>
   <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-item">+ Add line item</button></div>${saveNewHtml()}</fieldset>
   ${o?partsSectionHtml(o):''}
-  <label class="f">Note for this visit<textarea name="notes" rows="2">${esc(o&&o.notes||'')}</textarea></label>
+  <label class="f">Note for this visit<textarea name="notes" rows="2">${esc(notes)}</textarea></label>
   <div id="apptSum"></div>
   ${o||pf?'':`<p class="muted" style="margin-top:10px">For one-off and extra visits. Regular visits appear automatically from each customer’s schedule.</p>`}
   <div class="actions"><button class="btn primary" type="submit">${o?'Save changes':pf?`Add part ${partNo}`:'Add to schedule'}</button>${o&&o.status!=='completed'?`<button type="button" class="btn done-btn" data-action="appt-done">✓ Mark as done</button>`:''}</div>
-  ${o&&o.status!=='completed'?`<p class="muted" style="margin-top:8px">Mark as done logs the visit with the time and line items above. You can change the details later under Visits.</p>`:''}</form>`);
+  ${lv?`<button type="button" class="linkbtn" style="margin-top:12px" data-action="edit-visit" data-id="${esc(lv.id)}">Change the rate, work done or invoiced status</button>`:''}</form>`);
   updateApptSum($('#apptForm'));
 }
 async function saveAppt(form){
@@ -679,10 +686,11 @@ async function saveAppt(form){
   await saveNewItems(form,items);
   const done=form.dataset.done==='1';form.dataset.done='';
   if(done&&date>todayStr())return toast('That date is still to come. Change it to today or earlier to mark it as done.');
-  if(done){const c=S.customers[cid]||{};const vid=newId();
-    const visit={customerId:cid,date,start:body.start,end:body.start?addMins(body.start,body.duration):'',minutes:body.duration,tasks:o.task?[o.task]:(c.tasks||[]).slice(),materials:items,
-      labourType:ltFor(c),rate:c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate,fixedPrice:c.price??'',notes:body.notes,invoiced:false,invoicedOn:null,
-      scheduledKey:o.key,partOf:o.partOf||'',createdAt:new Date().toISOString()};
+  const lv=form.dataset.vid?S.visits.find(x=>x.id===form.dataset.vid):null;
+  if(lv){const{id:vid,...rest}=clone(lv);
+    const upd={...rest,date,start:body.start,end:body.start?addMins(body.start,body.duration):'',minutes:body.duration,materials:items,notes:body.notes};
+    return persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);await store.put('visits',vid,upd);},'Visit updated');}
+  if(done){const vid=newId();const visit=makeVisit(o,{date,start:body.start,duration:body.duration,items,notes:body.notes});
     return persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);await store.put('visits',vid,visit);},`Visit logged: ${fmtMins(body.duration)}`);}
   await persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);},o?(o.date!==date||o.start!==body.start?'Visit updated and moved':'Visit updated'):partOf?`Part ${body.part} added for ${shortDate(date)}`:'Visit added to the schedule');
 }
@@ -1419,6 +1427,12 @@ document.addEventListener('click',async e=>{
     case 'open-occ':openOccurrence(a.dataset.key);break;
     case 'new-appt':openApptForm({date:a.dataset.d});break;
     case 'move-occ':openApptForm({key:a.dataset.key});break;
+    case 'quick-done':{const o=findOcc(a.dataset.key);if(!o)break;
+      if(o.date>todayStr()){toast('That visit is still to come. Use Edit or reschedule to change the date first.');break;}
+      a.disabled=true;
+      try{await store.put('visits',newId(),makeVisit(o,{date:o.date,start:o.start,duration:o.duration,items:o.items||[],notes:o.notes||''}));
+        closeSheet();toast(`Marked as done: ${fmtMins(o.duration)}`);}catch(err){a.disabled=false;toast('That didn’t save. Check your signal and try again.');}
+      break;}
     case 'appt-done':{const f=a.closest('form');f.dataset.done='1';f.requestSubmit();break;}
     case 'part-add':{const box=$('#partRows'),f=box.closest('form'),root=box.dataset.root;
       const n=Math.max(1,...jobParts(root).map(e=>e.part||2))+[...box.querySelectorAll('.part-row')].filter(r=>!r.dataset.id).length+1;
