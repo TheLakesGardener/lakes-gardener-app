@@ -93,6 +93,9 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .hm-field{margin-top:14px}
 .part-row{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 10px;margin-top:8px}
 .pr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
+.part-item{margin:2px 0 6px;grid-template-columns:1fr 1fr}
+.part-item .pick-wrap{grid-column:1/-1}
+.part-item>span{display:none}
 .pr-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .pr-grid .hm{grid-column:span 2;margin-top:0}
 .pr-grid input{margin-top:0}
@@ -323,7 +326,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-5';let updateWaiting=null;
+const APP_VERSION='2026-10-15-6';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -465,7 +468,7 @@ function occurrencesInRange(a,b){
   for(const e of S.schedule){
     if(e.date<a||e.date>b||!S.customers[e.customerId])continue;
     if(e.kind==='moved')push({key:`r:${e.customerId}:${e.originalDate}`,kind:'regular',moved:e.date!==e.originalDate,edited:true,customerId:e.customerId,origDate:e.originalDate,date:e.date,start:e.start,duration:e.duration,exId:e.id,notes:e.notes,items:e.items||[]});
-    else if(e.kind==='extra')push({key:`x:${e.id}`,kind:'extra',customerId:e.customerId,date:e.date,start:e.start,duration:e.duration,exId:e.id,notes:e.notes,items:e.items||[],partOf:e.partOf||'',part:e.part||0});
+    else if(e.kind==='extra')push({key:`x:${e.id}`,kind:'extra',customerId:e.customerId,date:e.date,start:e.start,duration:e.duration,exId:e.id,notes:e.notes,items:e.items||[],partOf:e.partOf||'',part:e.part||0,task:e.task||''});
   }
   return out.sort((x,y)=>x.date.localeCompare(y.date)||(x.start||'99').localeCompare(y.start||'99')||custName(x.customerId).localeCompare(custName(y.customerId)));
 }
@@ -481,7 +484,7 @@ function shiftCal(n){const d=calDate(),v=S.cal.view;if(v==='day')return addDays(
 function apptCard(o,showDate){
   const c=S.customers[o.customerId]||{};
   const time=o.start?`${o.start}–${addMins(o.start,o.duration)}`:'Any time';
-  const flag={completed:'Done',missed:'Not logged',skipped:'Skipped'}[o.status]||(o.partOf?`Part ${o.part||2}`:o.kind==='extra'?'Extra visit':o.moved?'Moved':(o.items||[]).length?'Extras':'');
+  const flag={completed:'Done',missed:'Not logged',skipped:'Skipped'}[o.status]||(o.partOf?`Part ${o.part||2}${o.task?`: ${esc(o.task)}`:''}`:o.kind==='extra'?'Extra visit':o.moved?'Moved':(o.items||[]).length?'Extras':'');
   return `<button class="appt ${o.status}${o.kind==='extra'?' extra':''}" data-action="open-occ" data-key="${esc(o.key)}"><span class="t">${showDate?niceDate(o.date,{weekday:'short',day:'numeric',month:'short'})+', ':''}${time}${flag?` <span class="flag">${flag}</span>`:''}</span><strong>${esc(c.name||'Removed customer')}</strong>${c.address?`<span class="sub">${esc(c.address.split('\n')[0])}</span>`:''}</button>`;
 }
 function viewSchedule(){
@@ -528,6 +531,7 @@ function openOccurrence(key){
   ${addr?`<p>${esc(addr)}<br><a href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(addr)}" target="_blank" rel="noopener">Directions</a></p>`:''}
   ${phone?`<p><a href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a></p>`:''}
   ${(c.tasks||[]).length?`<p><span class="muted">Usual jobs:</span> ${esc(c.tasks.join(', '))}</p>`:''}
+  ${o.partOf?`<p><span class="muted">This visit is for:</span> ${esc(o.task||'Main job')}</p>`:''}
   ${partList.length?`<p><span class="muted">This job:</span> ${partList.map(x=>`<button class="linkbtn" data-action="open-occ" data-key="${esc(x.k)}">${esc(x.label)} ${shortDate(x.date)}</button>`).join(', ')}</p>`:''}
   ${o.notes?`<p><span class="muted">Visit note:</span> ${esc(o.notes)}</p>`:''}
   ${(o.items||[]).length?`<div class="totals" style="margin-top:10px">${o.items.map(m=>`<div><span>${esc(m.name)}${m.qty!==1?` x ${fmtNum(m.qty)}`:''}</span><span>${m.price?gbp(r2(m.qty*m.price)):'price on the day'}</span></div>`).join('')}<div class="grand"><span>Line items for this visit</span><span>${gbp(itemsTotal(o.items))}</span></div></div>`:''}
@@ -550,25 +554,35 @@ async function saveNewItems(form,items){
 }
 function partRow(x){const d=x.duration||60;
   return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
+  ${x.fixed?'':`<div class="mat-row part-item"><div class="pick-wrap"><input name="mname" autocomplete="off" placeholder="Main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${x.done?' disabled':''}></div><input name="mqty" type="number" inputmode="decimal" min="0" step="any" value="${esc(x.qty||1)}" aria-label="Quantity"${x.done?' disabled':''}><input name="mprice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="£ price" value="${esc(x.price||'')}" aria-label="Price"${x.done?' disabled':''}><span></span></div>`}
   ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`<div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${x.done?' disabled':''}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${x.done?' disabled':''}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${x.done?' disabled':''}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${x.done?' disabled':''}><span>m</span></span></div>`}</div>`;}
 function partsSectionHtml(o){
   const root=o.partOf||o.key,rows=[];
   if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Started',date:r.date,start:r.start,fixed:true});}
-  for(const e of jobParts(root)){if(`x:${e.id}`===o.key)continue;const done=S.visits.some(v=>v.scheduledKey===`x:${e.id}`);rows.push({id:e.id,label:`Part ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done});}
-  return `<fieldset class="f"><legend>Visits on this job <span class="hint">if the job runs over more than one day</span></legend><div id="partRows" data-root="${esc(root)}">${rows.map(partRow).join('')}</div>
+  for(const e of jobParts(root)){if(`x:${e.id}`===o.key)continue;const done=S.visits.some(v=>v.scheduledKey===`x:${e.id}`);const it=(e.items||[])[0];rows.push({id:e.id,label:`Part ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done,task:e.task||'',qty:it&&it.name===e.task?it.qty:1,price:it&&it.name===e.task?it.price:''});}
+  return `<fieldset class="f"><legend>Visits on this job <span class="hint">if the job runs over more than one day; say what each one is for</span></legend><div id="partRows" data-root="${esc(root)}">${rows.map(partRow).join('')}</div>
   <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="part-add">+ Visit</button></div></fieldset>`;
 }
 async function saveParts(form,cid){
   const box=form.querySelector('#partRows');if(!box)return;const root=box.dataset.root;
-  let n=Math.max(1,...jobParts(root).map(e=>e.part||2));
+  let n=Math.max(1,...jobParts(root).map(e=>e.part||2));const newTasks=[];
   for(const id of (form.dataset.removed||'').split(',').filter(Boolean))await store.remove('schedule',id);
   for(const r of box.querySelectorAll('.part-row')){const date=r.querySelector('[name=pdate]');if(!date||date.disabled||!date.value)continue;
     const id=r.dataset.id||newId(),prev=S.schedule.find(e=>e.id===id)||{};
     const dur=(parseInt(r.querySelector('[name=ph]').value,10)||0)*60+(parseInt(r.querySelector('[name=pm]').value,10)||0)||60;
     const part=prev.part||++n;
-    await store.put('schedule',id,{...prev,id:undefined,customerId:cid,kind:'extra',date:date.value,start:r.querySelector('[name=pstart]').value||'',duration:dur,partOf:root,part,items:prev.items||[],notes:prev.notes||''});}
+    let task=(r.querySelector('[name=mname]').value||'').trim();if(/^main job/i.test(task))task='';
+    const qty=parseFloat(r.querySelector('[name=mqty]').value)||1,price=parseFloat(r.querySelector('[name=mprice]').value)||0;
+    const others=(prev.items||[]).filter(m=>m.name!==prev.task);
+    const items=task&&price?[{name:task,qty,price},...others]:others;
+    if(task)newTasks.push({name:task,price});
+    await store.put('schedule',id,{...prev,id:undefined,customerId:cid,kind:'extra',date:date.value,start:r.querySelector('[name=pstart]').value||'',duration:dur,partOf:root,part,task,items,notes:prev.notes||''});}
+  if(newTasks.length){const known=new Set(catalogue().map(x=>x.name.toLowerCase())),next=clone(S.settings);let changed=false;
+    for(const t of newTasks){const k=t.name.toLowerCase();if(known.has(k))continue;known.add(k);changed=true;
+      if(t.price)next.services=[...(next.services||[]),{name:t.name,price:t.price}];else next.tasks=[...(next.tasks||[]),t.name];}
+    if(changed)await saveSettings(next);}
 }
-function updateApptSum(form){const el=$('#apptSum');if(!el)return;const it=readItems(form);el.textContent=it.length?`Line items: ${gbp(itemsTotal(it))}`:'';}
+function updateApptSum(form){const el=$('#apptSum');if(!el)return;const it=readItems($('#apptRows')||form);el.textContent=it.length?`Line items: ${gbp(itemsTotal(it))}`:'';}
 function openApptForm(p){
   const custs=sortedCustomers();if(!custs.length){toast('Add a customer first.');return openCustomerForm();}
   const o=p.key?findOcc(p.key):null,pf=p.partOf?findOcc(p.partOf):null;
@@ -599,19 +613,19 @@ async function saveAppt(form){
   const partOf=form.dataset.partOf||'',pf=partOf?findOcc(partOf):null;
   const cid=o?o.customerId:pf?pf.customerId:fd.get('customerId'),date=fd.get('date');
   if(!cid||!date)return toast('Choose a customer and a date.');
-  const items=readItems(form);
+  const items=readItems($('#apptRows')||form);
   const body={customerId:cid,date,start:fd.get('start')||'',duration:readDur(form,'duration')||60,notes:(fd.get('notes')||'').trim(),items};
   let id;
   if(o&&o.kind==='extra'){id=o.exId;body.kind='extra';}
   else if(o){id=`${cid}_${o.origDate}`;body.kind='moved';body.originalDate=o.origDate;}
   else{id=newId();body.kind='extra';if(partOf){body.partOf=partOf;body.part=Number(form.dataset.part)||2;}}
-  if(o&&o.partOf){body.partOf=o.partOf;body.part=o.part||2;}
+  if(o&&o.partOf){body.partOf=o.partOf;body.part=o.part||2;body.task=o.task||'';}
   S.cal.date=date;
   await saveNewItems(form,items);
   const done=form.dataset.done==='1';form.dataset.done='';
   if(done&&date>todayStr())return toast('That date is still to come. Change it to today or earlier to mark it as done.');
   if(done){const c=S.customers[cid]||{};const vid=newId();
-    const visit={customerId:cid,date,start:body.start,end:body.start?addMins(body.start,body.duration):'',minutes:body.duration,tasks:(c.tasks||[]).slice(),materials:items,
+    const visit={customerId:cid,date,start:body.start,end:body.start?addMins(body.start,body.duration):'',minutes:body.duration,tasks:o.task?[o.task]:(c.tasks||[]).slice(),materials:items,
       labourType:ltFor(c),rate:c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate,fixedPrice:c.price??'',notes:body.notes,invoiced:false,invoicedOn:null,
       scheduledKey:o.key,partOf:o.partOf||'',createdAt:new Date().toISOString()};
     return persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);await store.put('visits',vid,visit);},`Visit logged: ${fmtMins(body.duration)}`);}
@@ -1119,7 +1133,10 @@ function openPicker(input){
   if(!panel){panel=document.createElement('div');panel.className='picker';panel.setAttribute('role','listbox');wrap.appendChild(panel);}
   const q=input.value.trim().toLowerCase();
   let items;
-  if(!q){items=[...recentExtras(),...catalogue().filter(x=>x.group==='Services'&&x.price>0),...catalogue().filter(x=>x.group==='Services'&&!x.price).slice(0,8),...catalogue().filter(x=>x.group==='Products').slice(0,12)];}
+  const inPart=!!input.closest('.part-row');
+  if(inPart&&!q){const f=input.closest('form'),cid=f&&f.elements.customerId&&f.elements.customerId.value,c=S.customers[cid]||{};
+    items=[{name:'Main job',price:0,group:(c.tasks||[]).length?`Main job: ${c.tasks.join(', ')}`:'Main job'},...catalogue().filter(x=>x.group==='Services')];}
+  else if(!q){items=[...recentExtras(),...catalogue().filter(x=>x.group==='Services'&&x.price>0),...catalogue().filter(x=>x.group==='Services'&&!x.price).slice(0,8),...catalogue().filter(x=>x.group==='Products').slice(0,12)];}
   else{const words=q.split(/\s+/);items=catalogue().filter(x=>{const n=x.name.toLowerCase();return words.every(w=>n.includes(w));})
     .sort((a,b)=>(b.name.toLowerCase().startsWith(q)-a.name.toLowerCase().startsWith(q))||(a.group===b.group?0:a.group==='Services'?-1:1)).slice(0,40);}
   const seen=new Set();items=items.filter(x=>{const k=x.group+'|'+x.name.toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
@@ -1127,7 +1144,7 @@ function openPicker(input){
   items.forEach((x,i)=>{if(x.group!==g){g=x.group;html+=`<h4>${esc(g)}</h4>`;}
     html+=`<button type="button" role="option" data-pick="${i}" aria-selected="${i===0&&q?'true':'false'}"><span>${esc(x.name)}</span><span>${x.price?gbp(x.price):'price on the day'}</span></button>`;});
   if(!items.length)html=`<div class="none">Nothing matches. Keep typing to add “${esc(input.value.trim())}” as a one-off.</div>`;
-  if(!q)html+=`<div class="none">Type to search ${catalogue().length} products and services.</div>`;
+  if(!q)html+=`<div class="none">${inPart?'Or type a new task; it’s saved to your list.':`Type to search ${catalogue().length} products and services.`}</div>`;
   panel.innerHTML=html;panel.hidden=false;input.setAttribute('aria-expanded','true');
   pickState={input,items,idx:q&&items.length?0:-1};
 }
@@ -1137,6 +1154,7 @@ function choosePick(i){
   const row=input.closest('.mat-row');input.value=x.name;
   const p=row.querySelector('[name=mprice]');if(x.price)p.value=x.price;else if(!p.value)p.value='';
   closePicker();afterRowChange(input);
+  if(row.classList.contains('part-item')){input.blur();return;}
   const next=x.price?row.querySelector('[name=mqty]'):p;next.focus();next.select&&next.select();
 }
 function afterRowChange(el){
@@ -1344,7 +1362,7 @@ document.addEventListener('click',async e=>{
     case 'move-occ':openApptForm({key:a.dataset.key});break;
     case 'appt-done':{const f=a.closest('form');f.dataset.done='1';f.requestSubmit();break;}
     case 'part-add':{const box=$('#partRows'),f=box.closest('form'),root=box.dataset.root;
-      const n=Math.max(1,...jobParts(root).map(e=>e.part||2))+box.querySelectorAll('.part-row:not([data-id])').length+1;
+      const n=Math.max(1,...jobParts(root).map(e=>e.part||2))+[...box.querySelectorAll('.part-row')].filter(r=>!r.dataset.id).length+1;
       const last=[...box.querySelectorAll('[name=pdate]')].map(x=>x.value).filter(Boolean).sort().pop()||f.elements.date.value||todayStr();
       let d=addDays(last,1);if(d<=todayStr())d=addDays(todayStr(),1);
       const left=Math.max(30,(readDur(f,'duration')||60)-(f.elements.start.value&&f.elements.end.value?0:0));
