@@ -91,6 +91,12 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .check{display:flex;gap:10px;align-items:center;margin-top:14px;font-size:.95rem}
 .mat-row{display:grid;grid-template-columns:1fr 62px 86px 44px;gap:6px;align-items:end}
 .hm-field{margin-top:14px}
+.part-row{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 10px;margin-top:8px}
+.pr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
+.pr-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.pr-grid .hm{grid-column:span 2;margin-top:0}
+.pr-grid input{margin-top:0}
+.done-btn{border-color:var(--fern);color:var(--fern);font-weight:700}
 .quick{margin-top:14px}
 .quick .qlabel{display:block;font-weight:700;font-size:.92rem}
 .quick .dur{margin-top:8px}
@@ -314,7 +320,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-3';let updateWaiting=null;
+const APP_VERSION='2026-10-15-4';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -508,8 +514,8 @@ function openOccurrence(key){
   let act;
   if(o.status==='completed')act=`<button class="btn primary" data-action="edit-visit" data-id="${esc(o.visitId)}">View visit</button>`;
   else if(o.status==='skipped')act=`<button class="btn" data-action="restore-occ" data-key="${esc(key)}">Put back on schedule</button>`;
-  else act=`<button class="btn primary" data-action="log-occ" data-key="${esc(key)}">Log visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule</button><button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
-  if(o.status!=='skipped')act+=`<button class="btn" data-action="add-part" data-key="${esc(key)}">+ Visit to finish the job</button>`;
+  else act=`<button class="btn primary" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
+  if(o.status==='completed')act+=`<button class="btn" data-action="add-part" data-key="${esc(key)}">+ Visit to finish the job</button>`;
   const parts=jobParts(o.partOf||key).filter(e=>`x:${e.id}`!==key);
   const root=o.partOf&&o.partOf!==key?[{label:'Started',date:jobDate(o.partOf),k:o.partOf}]:[];
   const partList=[...root,...parts.map(e=>({label:`Part ${e.part||2}`,date:e.date,k:`x:${e.id}`}))];
@@ -539,6 +545,26 @@ async function saveNewItems(form,items){
   const next=clone(S.settings);next[as]=[...(next[as]||[]),...fresh];
   try{await saveSettings(next);}catch(e){}
 }
+function partRow(x){const d=x.duration||60;
+  return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
+  ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`<div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${x.done?' disabled':''}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${x.done?' disabled':''}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${x.done?' disabled':''}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${x.done?' disabled':''}><span>m</span></span></div>`}</div>`;}
+function partsSectionHtml(o){
+  const root=o.partOf||o.key,rows=[];
+  if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Started',date:r.date,start:r.start,fixed:true});}
+  for(const e of jobParts(root)){if(`x:${e.id}`===o.key)continue;const done=S.visits.some(v=>v.scheduledKey===`x:${e.id}`);rows.push({id:e.id,label:`Part ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done});}
+  return `<fieldset class="f"><legend>Visits on this job <span class="hint">if the job runs over more than one day</span></legend><div id="partRows" data-root="${esc(root)}">${rows.map(partRow).join('')}</div>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="part-add">+ Visit</button></div></fieldset>`;
+}
+async function saveParts(form,cid){
+  const box=form.querySelector('#partRows');if(!box)return;const root=box.dataset.root;
+  let n=Math.max(1,...jobParts(root).map(e=>e.part||2));
+  for(const id of (form.dataset.removed||'').split(',').filter(Boolean))await store.remove('schedule',id);
+  for(const r of box.querySelectorAll('.part-row')){const date=r.querySelector('[name=pdate]');if(!date||date.disabled||!date.value)continue;
+    const id=r.dataset.id||newId(),prev=S.schedule.find(e=>e.id===id)||{};
+    const dur=(parseInt(r.querySelector('[name=ph]').value,10)||0)*60+(parseInt(r.querySelector('[name=pm]').value,10)||0)||60;
+    const part=prev.part||++n;
+    await store.put('schedule',id,{...prev,id:undefined,customerId:cid,kind:'extra',date:date.value,start:r.querySelector('[name=pstart]').value||'',duration:dur,partOf:root,part,items:prev.items||[],notes:prev.notes||''});}
+}
 function updateApptSum(form){const el=$('#apptSum');if(!el)return;const it=readItems(form);el.textContent=it.length?`Line items: ${gbp(itemsTotal(it))}`:'';}
 function openApptForm(p){
   const custs=sortedCustomers();if(!custs.length){toast('Add a customer first.');return openCustomerForm();}
@@ -558,9 +584,11 @@ function openApptForm(p){
   ${hmBox('duration',dur,'Length','finish works this out')}
   <fieldset class="f"><legend>Line items for this visit <span class="hint">e.g. weed spraying, plants; added to the visit when you log it</span></legend><div id="apptRows">${items.map(matRow).join('')}</div>
   <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-item">+ Add line item</button></div><div class="items-sum" id="apptSum"></div>${saveNewHtml()}</fieldset>
+  ${o?partsSectionHtml(o):''}
   <label class="f">Note for this visit<textarea name="notes" rows="2">${esc(o&&o.notes||'')}</textarea></label>
   ${o||pf?'':`<p class="muted" style="margin-top:10px">For one-off and extra visits. Regular visits appear automatically from each customer’s schedule.</p>`}
-  <div class="actions"><button class="btn primary" type="submit">${o?'Save changes':pf?`Add part ${partNo}`:'Add to schedule'}</button></div></form>`);
+  <div class="actions"><button class="btn primary" type="submit">${o?'Save changes':pf?`Add part ${partNo}`:'Add to schedule'}</button>${o&&o.status!=='completed'?`<button type="button" class="btn done-btn" data-action="appt-done">✓ Mark as done</button>`:''}</div>
+  ${o&&o.status!=='completed'?`<p class="muted" style="margin-top:8px">Mark as done logs the visit with the time and line items above. You can change the details later under Visits.</p>`:''}</form>`);
   updateApptSum($('#apptForm'));
 }
 async function saveAppt(form){
@@ -577,7 +605,14 @@ async function saveAppt(form){
   if(o&&o.partOf){body.partOf=o.partOf;body.part=o.part||2;}
   S.cal.date=date;
   await saveNewItems(form,items);
-  await persist(form,()=>store.put('schedule',id,body),o?(o.date!==date||o.start!==body.start?'Visit updated and moved':'Visit updated'):partOf?`Part ${body.part} added for ${shortDate(date)}`:'Visit added to the schedule');
+  const done=form.dataset.done==='1';form.dataset.done='';
+  if(done&&date>todayStr())return toast('That date is still to come. Change it to today or earlier to mark it as done.');
+  if(done){const c=S.customers[cid]||{};const vid=newId();
+    const visit={customerId:cid,date,start:body.start,end:body.start?addMins(body.start,body.duration):'',minutes:body.duration,tasks:(c.tasks||[]).slice(),materials:items,
+      labourType:ltFor(c),rate:c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate,fixedPrice:c.price??'',notes:body.notes,invoiced:false,invoicedOn:null,
+      scheduledKey:o.key,partOf:o.partOf||'',createdAt:new Date().toISOString()};
+    return persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);await store.put('visits',vid,visit);},`Visit logged: ${fmtMins(body.duration)}`);}
+  await persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);},o?(o.date!==date||o.start!==body.start?'Visit updated and moved':'Visit updated'):partOf?`Part ${body.part} added for ${shortDate(date)}`:'Visit added to the schedule');
 }
 
 function viewVisits(){
@@ -1303,6 +1338,14 @@ document.addEventListener('click',async e=>{
     case 'open-occ':openOccurrence(a.dataset.key);break;
     case 'new-appt':openApptForm({date:a.dataset.d});break;
     case 'move-occ':openApptForm({key:a.dataset.key});break;
+    case 'appt-done':{const f=a.closest('form');f.dataset.done='1';f.requestSubmit();break;}
+    case 'part-add':{const box=$('#partRows'),f=box.closest('form'),root=box.dataset.root;
+      const n=Math.max(1,...jobParts(root).map(e=>e.part||2))+box.querySelectorAll('.part-row:not([data-id])').length+1;
+      const last=[...box.querySelectorAll('[name=pdate]')].map(x=>x.value).filter(Boolean).sort().pop()||f.elements.date.value||todayStr();
+      let d=addDays(last,1);if(d<=todayStr())d=addDays(todayStr(),1);
+      const left=Math.max(30,(readDur(f,'duration')||60)-(f.elements.start.value&&f.elements.end.value?0:0));
+      box.insertAdjacentHTML('beforeend',partRow({label:`Part ${n}`,date:d,start:'',duration:Math.min(left,120)}));break;}
+    case 'part-remove':{const r=a.closest('.part-row'),f=r.closest('form');if(r.dataset.id)f.dataset.removed=((f.dataset.removed||'')+','+r.dataset.id);r.remove();break;}
     case 'add-part':{const o=findOcc(a.dataset.key);if(!o)break;openApptForm({partOf:o.partOf||o.key});break;}
     case 'log-occ':{const o=findOcc(a.dataset.key);if(!o)break;closeSheet();
       openVisitForm({customerId:o.customerId,date:o.date>todayStr()?todayStr():o.date,start:o.start,end:o.start?addMins(o.start,o.duration):'',scheduledKey:o.key,materials:o.items,partOf:o.partOf||''});break;}
