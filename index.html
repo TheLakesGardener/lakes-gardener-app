@@ -95,9 +95,9 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .pr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
 .pr-charge{margin:8px 0 2px;font-size:.88rem;color:var(--muted);font-weight:600}
 .charge{margin-top:12px}
-.part-item{margin:2px 0 6px;grid-template-columns:1fr 1fr}
-.part-item .pick-wrap{grid-column:1/-1}
-.part-item>span{display:none}
+.p-items .mat-row{margin-top:6px}
+.part-row .pr-grid{margin-top:8px}
+.charge .sub-h{font-weight:700;font-size:.82rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding-top:10px}
 .pr-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .pr-grid .hm{grid-column:span 2;margin-top:0}
 .pr-grid input{margin-top:0}
@@ -328,7 +328,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-7';let updateWaiting=null;
+const APP_VERSION='2026-10-15-8';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -568,44 +568,52 @@ async function saveNewItems(form,items){
   const next=clone(S.settings);next[as]=[...(next[as]||[]),...fresh];
   try{await saveSettings(next);}catch(e){}
 }
-function partRow(x){const d=x.duration||60;
-  return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
-  ${x.fixed?'':`<div class="mat-row part-item"><div class="pick-wrap"><input name="mname" autocomplete="off" placeholder="Main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${x.done?' disabled':''}></div><input name="mqty" type="number" inputmode="decimal" min="0" step="any" value="${esc(x.qty||1)}" aria-label="Quantity"${x.done?' disabled':''}><input name="mprice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="£ price" value="${esc(x.price||'')}" aria-label="Price"${x.done?' disabled':''}><span></span></div>`}
-  ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`<div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${x.done?' disabled':''}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${x.done?' disabled':''}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${x.done?' disabled':''}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${x.done?' disabled':''}><span>m</span></span></div><p class="pr-charge"></p>`}</div>`;}
+function partRow(x){const d=x.duration||60,dis=x.done?' disabled':'';
+  return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:x.fixed?'':`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
+  ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`
+  <label class="f" style="margin-top:4px">What for?</label><div class="pick-wrap"><input name="ptask" autocomplete="off" placeholder="Main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${dis}></div>
+  <div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${dis}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${dis}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${dis}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${dis}><span>m</span></span></div>
+  <div class="p-items">${(x.items||[]).map(matRow).join('')}</div>
+  ${x.done?'':`<button type="button" class="btn small" data-action="part-add-item" style="margin-top:8px">+ Add line item</button>`}
+  <p class="pr-charge"></p>`}</div>`;}
 function partsSectionHtml(o){
   const root=o.partOf||o.key,rows=[];
   if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Started',date:r.date,start:r.start,fixed:true});}
-  for(const e of jobParts(root)){if(`x:${e.id}`===o.key)continue;const done=S.visits.some(v=>v.scheduledKey===`x:${e.id}`);const it=(e.items||[])[0];rows.push({id:e.id,label:`Part ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done,task:e.task||'',qty:it&&it.name===e.task?it.qty:1,price:it&&it.name===e.task?it.price:''});}
+  for(const e of jobParts(root)){if(`x:${e.id}`===o.key)continue;const done=S.visits.some(v=>v.scheduledKey===`x:${e.id}`);
+    rows.push({id:e.id,label:`Part ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done,task:e.task||'',items:e.items||[]});}
   return `<fieldset class="f"><legend>Visits on this job <span class="hint">if the job runs over more than one day; say what each one is for</span></legend><div id="partRows" data-root="${esc(root)}">${rows.map(partRow).join('')}</div>
   <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="part-add">+ Visit</button></div></fieldset>`;
 }
+function readPart(r){
+  let task=(r.querySelector('[name=ptask]').value||'').trim();if(/^main job/i.test(task))task='';
+  const dur=(parseInt(r.querySelector('[name=ph]').value,10)||0)*60+(parseInt(r.querySelector('[name=pm]').value,10)||0);
+  return{task,dur,items:readItems(r.querySelector('.p-items')),date:r.querySelector('[name=pdate]').value,start:r.querySelector('[name=pstart]').value||''};
+}
 async function saveParts(form,cid){
   const box=form.querySelector('#partRows');if(!box)return;const root=box.dataset.root;
-  let n=Math.max(1,...jobParts(root).map(e=>e.part||2));const newTasks=[];
+  let n=Math.max(1,...jobParts(root).map(e=>e.part||2));const newTasks=[],allItems=[];
   for(const id of (form.dataset.removed||'').split(',').filter(Boolean))await store.remove('schedule',id);
   for(const r of box.querySelectorAll('.part-row')){const date=r.querySelector('[name=pdate]');if(!date||date.disabled||!date.value)continue;
-    const id=r.dataset.id||newId(),prev=S.schedule.find(e=>e.id===id)||{};
-    const dur=(parseInt(r.querySelector('[name=ph]').value,10)||0)*60+(parseInt(r.querySelector('[name=pm]').value,10)||0)||60;
-    const part=prev.part||++n;
-    let task=(r.querySelector('[name=mname]').value||'').trim();if(/^main job/i.test(task))task='';
-    const qty=parseFloat(r.querySelector('[name=mqty]').value)||1,price=parseFloat(r.querySelector('[name=mprice]').value)||0;
-    const others=(prev.items||[]).filter(m=>m.name!==prev.task);
-    const items=task&&price?[{name:task,qty,price},...others]:others;
-    if(task)newTasks.push({name:task,price});
-    await store.put('schedule',id,{...prev,id:undefined,customerId:cid,kind:'extra',date:date.value,start:r.querySelector('[name=pstart]').value||'',duration:dur,partOf:root,part,task,items,notes:prev.notes||''});}
-  if(newTasks.length){const known=new Set(catalogue().map(x=>x.name.toLowerCase())),next=clone(S.settings);let changed=false;
-    for(const t of newTasks){const k=t.name.toLowerCase();if(known.has(k))continue;known.add(k);changed=true;
-      if(t.price)next.services=[...(next.services||[]),{name:t.name,price:t.price}];else next.tasks=[...(next.tasks||[]),t.name];}
-    if(changed)await saveSettings(next);}
+    const id=r.dataset.id||newId(),prev=S.schedule.find(e=>e.id===id)||{},pt=readPart(r);
+    const part=prev.part||++n;if(pt.task)newTasks.push(pt.task);allItems.push(...pt.items);
+    await store.put('schedule',id,{...prev,id:undefined,customerId:cid,kind:'extra',date:pt.date,start:pt.start,duration:pt.dur||60,partOf:root,part,task:pt.task,items:pt.items,notes:prev.notes||''});}
+  const known=new Set(catalogue().map(x=>x.name.toLowerCase())),fresh=uniq(newTasks).filter(t=>!known.has(t.toLowerCase()));
+  if(fresh.length){const next=clone(S.settings);next.tasks=[...(next.tasks||[]),...fresh];await saveSettings(next);}
+  if(allItems.length)await saveNewItems(form,allItems);
 }
 function updateApptSum(form){
-  const cid=form.elements.customerId&&form.elements.customerId.value;
-  const el=$('#apptSum');if(el){const it=readItems($('#apptRows')||form);el.innerHTML=cid?chargeHtml(chargeFor(cid,Number(form.elements.duration.value)||0,it)):'';}
-  form.querySelectorAll('.part-row').forEach(r=>{const out=r.querySelector('.pr-charge');if(!out)return;
-    const dur=(parseInt(r.querySelector('[name=ph]').value,10)||0)*60+(parseInt(r.querySelector('[name=pm]').value,10)||0);
-    const t=(r.querySelector('[name=mname]').value||'').trim(),pr=parseFloat(r.querySelector('[name=mprice]').value)||0,q=parseFloat(r.querySelector('[name=mqty]').value)||1;
-    const ch=chargeFor(cid,dur,t&&pr&&!/^main job/i.test(t)?[{name:t,qty:q,price:pr}]:[]);
-    out.textContent=`${ch.rows.map(x=>`${x[0]} = ${gbp(x[1])}`).join(' + ')}${ch.rows.length>1?`; total ${gbp(ch.total)}`:''}`;});
+  const cid=form.elements.customerId&&form.elements.customerId.value;if(!cid)return;
+  const main=chargeFor(cid,Number(form.elements.duration.value)||0,readItems($('#apptRows')||form));
+  const parts=[];
+  form.querySelectorAll('.part-row').forEach(r=>{const out=r.querySelector('.pr-charge');if(!out)return;const pt=readPart(r),ch=chargeFor(cid,pt.dur,pt.items);
+    out.textContent=`${ch.rows.map(x=>`${x[0]} = ${gbp(x[1])}`).join(' + ')}${ch.rows.length>1?`; total ${gbp(ch.total)}`:''}`;
+    parts.push({label:`${r.querySelector('.pr-top strong').textContent}${pt.task?`: ${pt.task}`:''}${pt.date?`, ${shortDate(pt.date)}`:''}`,ch});});
+  const el=$('#apptSum');if(!el)return;
+  if(!parts.length){el.innerHTML=chargeHtml(main);return;}
+  const total=r2(main.total+parts.reduce((t,x)=>t+x.ch.total,0));
+  el.innerHTML=`${main.warn?`<div class="warnbox">${esc(main.warn)}</div>`:''}<div class="totals charge"><div class="sub-h"><span>This visit</span></div>${main.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}
+    ${parts.map(p=>`<div class="sub-h"><span>${esc(p.label)}</span></div>${p.ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}`).join('')}
+    <div class="grand"><span>Job total</span><span>${gbp(total)}</span></div></div>`;
 }
 function openApptForm(p){
   const custs=sortedCustomers();if(!custs.length){toast('Add a customer first.');return openCustomerForm();}
@@ -624,9 +632,10 @@ function openApptForm(p){
   <div class="row2"><label class="f">Start <span class="hint">optional</span><input type="time" name="start" value="${esc(start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(start?addMins(start,dur):'')}"></label></div>
   ${hmBox('duration',dur,'Length','finish works this out')}
   <fieldset class="f"><legend>Line items for this visit <span class="hint">e.g. weed spraying, plants; added to the visit when you log it</span></legend><div id="apptRows">${items.map(matRow).join('')}</div>
-  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-item">+ Add line item</button></div><div id="apptSum"></div>${saveNewHtml()}</fieldset>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-item">+ Add line item</button></div>${saveNewHtml()}</fieldset>
   ${o?partsSectionHtml(o):''}
   <label class="f">Note for this visit<textarea name="notes" rows="2">${esc(o&&o.notes||'')}</textarea></label>
+  <div id="apptSum"></div>
   ${o||pf?'':`<p class="muted" style="margin-top:10px">For one-off and extra visits. Regular visits appear automatically from each customer’s schedule.</p>`}
   <div class="actions"><button class="btn primary" type="submit">${o?'Save changes':pf?`Add part ${partNo}`:'Add to schedule'}</button>${o&&o.status!=='completed'?`<button type="button" class="btn done-btn" data-action="appt-done">✓ Mark as done</button>`:''}</div>
   ${o&&o.status!=='completed'?`<p class="muted" style="margin-top:8px">Mark as done logs the visit with the time and line items above. You can change the details later under Visits.</p>`:''}</form>`);
@@ -1157,16 +1166,17 @@ function openPicker(input){
   if(!panel){panel=document.createElement('div');panel.className='picker';panel.setAttribute('role','listbox');wrap.appendChild(panel);}
   const q=input.value.trim().toLowerCase();
   let items;
-  const inPart=!!input.closest('.part-row');
+  const inPart=input.name==='ptask';
   if(inPart&&!q){const f=input.closest('form'),cid=f&&f.elements.customerId&&f.elements.customerId.value,c=S.customers[cid]||{};
     items=[{name:'Main job',price:0,group:(c.tasks||[]).length?`Main job: ${c.tasks.join(', ')}`:'Main job'},...catalogue().filter(x=>x.group==='Services')];}
   else if(!q){items=[...recentExtras(),...catalogue().filter(x=>x.group==='Services'&&x.price>0),...catalogue().filter(x=>x.group==='Services'&&!x.price).slice(0,8),...catalogue().filter(x=>x.group==='Products').slice(0,12)];}
   else{const words=q.split(/\s+/);items=catalogue().filter(x=>{const n=x.name.toLowerCase();return words.every(w=>n.includes(w));})
     .sort((a,b)=>(b.name.toLowerCase().startsWith(q)-a.name.toLowerCase().startsWith(q))||(a.group===b.group?0:a.group==='Services'?-1:1)).slice(0,40);}
   const seen=new Set();items=items.filter(x=>{const k=x.group+'|'+x.name.toLowerCase();if(seen.has(k))return false;seen.add(k);return true;});
+  if(q&&!items.some(x=>x.name.toLowerCase()===q))items.unshift({name:input.value.trim(),price:0,group:inPart?'New task':'New item',isNew:true});
   let html='',g='';
   items.forEach((x,i)=>{if(x.group!==g){g=x.group;html+=`<h4>${esc(g)}</h4>`;}
-    html+=`<button type="button" role="option" data-pick="${i}" aria-selected="${i===0&&q?'true':'false'}"><span>${esc(x.name)}</span><span>${x.price?gbp(x.price):'price on the day'}</span></button>`;});
+    html+=`<button type="button" role="option" data-pick="${i}" aria-selected="${i===0&&q?'true':'false'}"><span>${x.isNew?`+ Add “${esc(x.name)}”`:esc(x.name)}</span><span>${x.isNew?(inPart?'saved to your list':'add your price'):inPart&&!x.price?'':x.price?gbp(x.price):'price on the day'}</span></button>`;});
   if(!items.length)html=`<div class="none">${inPart?`New task: “${esc(input.value.trim())}” will be saved to your list.`:`Nothing matches. Keep typing to add “${esc(input.value.trim())}” as a one-off.`}</div>`;
   if(!q)html+=`<div class="none">${inPart?'Or type a new task; it’s saved to your list.':`Type to search ${catalogue().length} products and services.`}</div>`;
   panel.innerHTML=html;panel.hidden=false;input.setAttribute('aria-expanded','true');
@@ -1175,10 +1185,12 @@ function openPicker(input){
 function closePicker(){if(!pickState)return;const p=pickState.input.closest('.pick-wrap')?.querySelector('.picker');if(p)p.remove();pickState.input.setAttribute('aria-expanded','false');pickState=null;}
 function choosePick(i){
   if(!pickState)return;const x=pickState.items[i],input=pickState.input;if(!x)return;
+  if(input.name==='ptask'){input.value=x.name;closePicker();input.blur();const pr=input.closest('.part-row');
+    if(x.price&&!x.isNew){pr.querySelector('.p-items').insertAdjacentHTML('beforeend',matRow({name:x.name,qty:1,price:x.price}));}
+    updateApptSum(input.closest('form'));return;}
   const row=input.closest('.mat-row');input.value=x.name;
   const p=row.querySelector('[name=mprice]');if(x.price)p.value=x.price;else if(!p.value)p.value='';
   closePicker();afterRowChange(input);
-  if(row.classList.contains('part-item')){input.blur();updateApptSum(input.closest('form'));return;}
   const next=x.price?row.querySelector('[name=mqty]'):p;next.focus();next.select&&next.select();
 }
 function afterRowChange(el){
@@ -1191,8 +1203,8 @@ function syncExtras(){
   S.inv.extras=[...box.querySelectorAll('.mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||0,price:parseFloat(r.querySelector('[name=mprice]').value)||0}));
   const d=draftInvoice(),t=$('#invTotals');if(d&&t)t.outerHTML=draftTotalsHtml(d);
 }
-document.addEventListener('focusin',e=>{if(e.target.name==='mname')openPicker(e.target);});
-document.addEventListener('focusout',e=>{if(e.target.name==='mname')setTimeout(()=>{if(pickState&&pickState.input===e.target&&document.activeElement!==e.target)closePicker();},180);});
+document.addEventListener('focusin',e=>{if(e.target.name==='mname'||e.target.name==='ptask')openPicker(e.target);});
+document.addEventListener('focusout',e=>{if(e.target.name==='mname'||e.target.name==='ptask')setTimeout(()=>{if(pickState&&pickState.input===e.target&&document.activeElement!==e.target)closePicker();},180);});
 document.addEventListener('mousedown',e=>{if(e.target.closest('.picker'))e.preventDefault();});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(b){e.preventDefault();e.stopPropagation();choosePick(Number(b.dataset.pick));}},true);
 document.addEventListener('keydown',e=>{
@@ -1392,6 +1404,7 @@ document.addEventListener('click',async e=>{
       let d=addDays(last,1);if(d<=todayStr())d=addDays(todayStr(),1);
       const left=Math.max(30,(readDur(f,'duration')||60)-(f.elements.start.value&&f.elements.end.value?0:0));
       box.insertAdjacentHTML('beforeend',partRow({label:`Part ${n}`,date:d,start:'',duration:Math.min(left,120)}));updateApptSum(f);break;}
+    case 'part-add-item':{const pi=a.closest('.part-row').querySelector('.p-items');pi.insertAdjacentHTML('beforeend',matRow());pi.lastElementChild.querySelector('input').focus();break;}
     case 'part-remove':{const r=a.closest('.part-row'),f=r.closest('form');if(r.dataset.id)f.dataset.removed=((f.dataset.removed||'')+','+r.dataset.id);r.remove();updateApptSum(f);break;}
     case 'add-part':{const o=findOcc(a.dataset.key);if(!o)break;openApptForm({partOf:o.partOf||o.key});break;}
     case 'log-occ':{const o=findOcc(a.dataset.key);if(!o)break;closeSheet();
@@ -1436,7 +1449,7 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('input',e=>{
   const f=e.target.closest('form');
-  if(e.target.name==='mname')openPicker(e.target);
+  if(e.target.name==='mname'||e.target.name==='ptask')openPicker(e.target);
   if(e.target.closest&&e.target.closest('#invExtras'))syncExtras();
   if(f&&e.target.dataset&&e.target.dataset.hm)readDur(f,e.target.dataset.for);
   if(f&&['start','end'].includes(e.target.name)||e.target.dataset&&e.target.dataset.hm)f&&f.querySelectorAll('[data-action=dur][aria-pressed=true]').forEach(x=>x.setAttribute('aria-pressed','false'));
