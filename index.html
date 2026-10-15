@@ -99,7 +99,10 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .done-btn{border-color:var(--fern);color:var(--fern);font-weight:700}
 .quick{margin-top:14px}
 .quick .qlabel{display:block;font-weight:700;font-size:.92rem}
-.quick .dur{margin-top:8px}
+.quick-wrap{display:flex;gap:12px;align-items:flex-start;margin-top:8px}
+.quick-wrap .dur{margin-top:0;flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.quick-wrap .dur-add{flex:0 0 74px;grid-template-columns:1fr;padding-left:12px;border-left:1.5px solid var(--line)}
+.quick-wrap .dur button{min-width:0;padding:6px 4px}
 .quick .dur button{min-width:56px;font-weight:600}
 .dur button[aria-pressed=true]{background:var(--moss);border-color:var(--moss);color:var(--on-moss)}
 .linkbtn{font:inherit;background:none;border:0;padding:0;color:var(--moss);text-decoration:underline;cursor:pointer;font-weight:600}
@@ -303,7 +306,7 @@ function niceDate(s,o){return new Date(toUTC(s)).toLocaleDateString('en-GB',{...
 function minsBetween(a,b){if(!a||!b)return 0;const[h1,m1]=a.split(':').map(Number),[h2,m2]=b.split(':').map(Number);let m=(h2*60+m2)-(h1*60+m1);if(m<0)m+=1440;return m;}
 function hmBox(name,mins,label,hint){mins=Math.max(0,Math.round(Number(mins)||0));const h=Math.floor(mins/60),m=mins%60;
   return `<div class="f hm-field"><label class="f" style="margin:0" for="hm-${name}">${label}${hint?` <span class="hint">${hint}</span>`:''}</label><div class="hm"><input id="hm-${name}" type="number" data-hm="h" data-for="${name}" min="0" max="23" inputmode="numeric" value="${mins?h:''}" placeholder="0" aria-label="${label}, hours"><span>h</span><input type="number" data-hm="m" data-for="${name}" min="0" max="59" step="5" inputmode="numeric" value="${mins?m:''}" placeholder="0" aria-label="${label}, minutes"><span>m</span></div><input type="hidden" name="${name}" value="${mins||''}"></div>`;}
-function quickDur(label){return `<div class="f quick"><span class="qlabel">${label}</span><div class="dur" aria-label="${label}">${[[30,'30m'],[60,'1h'],[90,'1½h'],[120,'2h'],[180,'3h'],[240,'4h'],[300,'5h'],[360,'6h'],[420,'7h'],[480,'8h']].map(([m,l])=>`<button type="button" data-action="dur" data-m="${m}">${l}</button>`).join('')}</div></div>`;}
+function quickDur(label){return `<div class="f quick"><span class="qlabel">${label}</span><div class="quick-wrap"><div class="dur" aria-label="${label}">${[1,2,3,4,5,6,7,8].map(h=>`<button type="button" data-action="dur" data-m="${h*60}">${h}h</button>`).join('')}</div><div class="dur dur-add" aria-label="Add minutes">${[15,30,45].map(m=>`<button type="button" data-action="dur" data-add="${m}">+${m}m</button>`).join('')}</div></div></div>`;}
 function setDur(form,name,mins){mins=Math.max(0,Math.round(Number(mins)||0));const hid=form.elements[name];if(!hid)return;hid.value=mins||'';
   const hh=form.querySelector(`[data-hm=h][data-for="${name}"]`),mm=form.querySelector(`[data-hm=m][data-for="${name}"]`);
   if(hh)hh.value=mins?Math.floor(mins/60):'';if(mm)mm.value=mins?mins%60:'';}
@@ -320,7 +323,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-4';let updateWaiting=null;
+const APP_VERSION='2026-10-15-5';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -1289,10 +1292,11 @@ document.addEventListener('click',async e=>{
     case 'toggle-paused':S.showPaused=!S.showPaused;$('#custList').innerHTML=custListHtml($('#custSearch')?$('#custSearch').value:'');break;
     case 'add-extra':{syncExtras();(S.inv.extras=S.inv.extras||[]).push({name:'',qty:1,price:''});render(true);const r=$('#invExtras')?.lastElementChild;r&&r.querySelector('input').focus();break;}
     case 'remove-mat':{const box=a.closest('#invExtras'),f=a.closest('#visitForm'),af=a.closest('#apptForm');a.closest('.mat-row').remove();if(f)updateVisitCalc(f);if(af)updateApptSum(af);if(box){syncExtras();render(true);}break;}
-    case 'dur':{const f=a.closest('form'),el=f.elements,m=Number(a.dataset.m),dn=f.id==='apptForm'?'duration':'minutes';
+    case 'dur':{const f=a.closest('form'),el=f.elements,dn=f.id==='apptForm'?'duration':'minutes';
+      const m=a.dataset.add?(readDur(f,dn)||0)+Number(a.dataset.add):Number(a.dataset.m);
       if(el.start.value)el.end.value=addMins(el.start.value,m);
       else if(f.id==='visitForm'){const d=new Date(),nowM=Math.floor((d.getHours()*60+d.getMinutes())/5)*5;el.end.value=`${pad(Math.floor(nowM/60))}:${pad(nowM%60)}`;el.start.value=addMins(el.end.value,-m);}
-      setDur(f,dn,m);f.querySelectorAll('[data-action=dur]').forEach(x=>x.setAttribute('aria-pressed',x===a?'true':'false'));
+      setDur(f,dn,m);if(!a.dataset.add)f.querySelectorAll('[data-action=dur]').forEach(x=>x.setAttribute('aria-pressed',x===a?'true':'false'));
       if(f.id==='visitForm')updateVisitCalc(f);break;}
     case 'start-timer':
       try{await saveSettings({...clone(S.settings),timer:{customerId:id,start:new Date().toISOString(),scheduledKey:a.dataset.key||''}});closeSheet();toast('Timer started');}catch(err){toast('The timer didn’t start. Try again.');}
