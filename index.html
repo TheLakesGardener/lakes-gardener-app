@@ -104,6 +104,11 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .pr-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .pr-grid .hm{grid-column:span 2;margin-top:0}
 .pr-grid input{margin-top:0}
+.btn.done-on{background:var(--tint);border-color:var(--fern);color:var(--fern);font-weight:700}
+.done-box{margin-top:12px;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:4px 14px}
+.done-box>div{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+.done-box>div:last-child{border-bottom:0}
+.done-box>div>span:last-child{text-align:right;font-weight:600}
 .done-btn{border-color:var(--fern);color:var(--fern);font-weight:700}
 .quick{margin-top:14px}
 .quick .qlabel{display:block;font-weight:700;font-size:.92rem}
@@ -331,7 +336,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-11';let updateWaiting=null;
+const APP_VERSION='2026-10-15-12';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -519,11 +524,13 @@ function viewSchedule(){
 function openOccurrence(key){
   const o=findOcc(key);if(!o)return toast('That visit is no longer on the schedule.');
   const c=S.customers[o.customerId]||{};
-  const time=o.start?`${o.start} to ${addMins(o.start,o.duration)}`:`any time, about ${fmtMins(o.duration)}`;
-  const st={completed:'Visit logged',missed:'Not logged yet',skipped:'Skipped',scheduled:'Scheduled'}[o.status];
+  const lv=o.status==='completed'&&o.visitId?S.visits.find(x=>x.id===o.visitId):null;
+  const time=lv?(lv.start&&lv.end?`${lv.start} to ${lv.end}, ${fmtMins(lv.minutes)}`:fmtMins(lv.minutes)):o.start?`${o.start} to ${addMins(o.start,o.duration)}`:`any time, about ${fmtMins(o.duration)}`;
+  const inv=lv&&lv.invoiceId?S.invoices.find(i=>i.id===lv.invoiceId):null;
+  const st={completed:'Done ✓',missed:'Not logged yet',skipped:'Skipped',scheduled:'Scheduled'}[o.status];
   const addr=c.address?c.address.replace(/\s*\n\s*/g,', '):'',phone=(c.phone||'').split(',')[0].trim();
   let act;
-  if(o.status==='completed')act=`<button class="btn primary" data-action="move-occ" data-key="${esc(key)}">Edit visit</button>`;
+  if(o.status==='completed')act=`<button class="btn done-on" data-action="undo-done" data-id="${esc(o.visitId)}" title="Tap twice to undo">✓ Done</button><button class="btn primary" data-action="move-occ" data-key="${esc(key)}">Edit job</button>`;
   else if(o.status==='skipped')act=`<button class="btn" data-action="restore-occ" data-key="${esc(key)}">Put back on schedule</button>`;
   else act=`<button class="btn primary" data-action="quick-done" data-key="${esc(key)}">✓ Mark as done</button><button class="btn" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
   const parts=jobParts(o.partOf||key).filter(e=>`x:${e.id}`!==key);
@@ -535,6 +542,10 @@ function openOccurrence(key){
   ${addr?`<p>${esc(addr)}<br><a href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(addr)}" target="_blank" rel="noopener">Directions</a></p>`:''}
   ${phone?`<p><a href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a></p>`:''}
   ${(c.tasks||[]).length?`<p><span class="muted">Usual jobs:</span> ${esc(c.tasks.join(', '))}</p>`:''}
+  ${lv?`<div class="done-box"><div><span class="muted">Work done</span><span>${esc((lv.tasks||[]).join(', ')||'Main job')}</span></div>
+    <div><span class="muted">Time on site</span><span>${esc(time)}</span></div>
+    ${lv.notes?`<div><span class="muted">Visit notes</span><span>${esc(lv.notes)}</span></div>`:''}
+    <div><span class="muted">Invoice</span><span>${lv.invoiced?(inv?`<button class="linkbtn" data-action="open-invoice" data-id="${esc(inv.id)}">${esc(inv.number)}</button>${inv.status==='paid'?' (paid)':''}`:'Invoiced'):'Not invoiced yet'}</span></div></div>`:''}
   ${o.status!=='skipped'?jobChargeHtml(o):''}
   ${o.partOf?`<p><span class="muted">This visit is for:</span> ${esc(o.task||'Main job')}</p>`:''}
   ${partList.length?`<p><span class="muted">This job:</span> ${partList.map(x=>`<button class="linkbtn" data-action="open-occ" data-key="${esc(x.k)}">${esc(x.label)} ${shortDate(x.date)}</button>`).join(', ')}</p>`:''}
@@ -1427,6 +1438,10 @@ document.addEventListener('click',async e=>{
     case 'open-occ':openOccurrence(a.dataset.key);break;
     case 'new-appt':openApptForm({date:a.dataset.d});break;
     case 'move-occ':openApptForm({key:a.dataset.key});break;
+    case 'undo-done':{const v=S.visits.find(x=>x.id===id);if(!v)break;
+      if(v.invoiced){toast('This visit is on an invoice. Remove it from the invoice first.');break;}
+      if(!armed(a,'Tap again to undo'))break;
+      try{await store.remove('visits',id);closeSheet();toast('Visit set back to not done');}catch(err){toast('That didn’t save. Try again.');}break;}
     case 'quick-done':{const o=findOcc(a.dataset.key);if(!o)break;
       if(o.date>todayStr()){toast('That visit is still to come. Use Edit or reschedule to change the date first.');break;}
       a.disabled=true;
