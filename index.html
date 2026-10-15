@@ -91,6 +91,11 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .check{display:flex;gap:10px;align-items:center;margin-top:14px;font-size:.95rem}
 .mat-row{display:grid;grid-template-columns:1fr 62px 86px 44px;gap:6px;align-items:end}
 .hm-field{margin-top:14px}
+.quick{margin-top:14px}
+.quick .qlabel{display:block;font-weight:700;font-size:.92rem}
+.quick .dur{margin-top:8px}
+.quick .dur button{min-width:56px;font-weight:600}
+.dur button[aria-pressed=true]{background:var(--moss);border-color:var(--moss);color:var(--on-moss)}
 .linkbtn{font:inherit;background:none;border:0;padding:0;color:var(--moss);text-decoration:underline;cursor:pointer;font-weight:600}
 .hm{display:flex;align-items:center;gap:6px;margin-top:6px}
 .hm input{width:72px;margin-top:0;text-align:center}
@@ -292,6 +297,7 @@ function niceDate(s,o){return new Date(toUTC(s)).toLocaleDateString('en-GB',{...
 function minsBetween(a,b){if(!a||!b)return 0;const[h1,m1]=a.split(':').map(Number),[h2,m2]=b.split(':').map(Number);let m=(h2*60+m2)-(h1*60+m1);if(m<0)m+=1440;return m;}
 function hmBox(name,mins,label,hint){mins=Math.max(0,Math.round(Number(mins)||0));const h=Math.floor(mins/60),m=mins%60;
   return `<div class="f hm-field"><label class="f" style="margin:0" for="hm-${name}">${label}${hint?` <span class="hint">${hint}</span>`:''}</label><div class="hm"><input id="hm-${name}" type="number" data-hm="h" data-for="${name}" min="0" max="23" inputmode="numeric" value="${mins?h:''}" placeholder="0" aria-label="${label}, hours"><span>h</span><input type="number" data-hm="m" data-for="${name}" min="0" max="59" step="5" inputmode="numeric" value="${mins?m:''}" placeholder="0" aria-label="${label}, minutes"><span>m</span></div><input type="hidden" name="${name}" value="${mins||''}"></div>`;}
+function quickDur(label){return `<div class="f quick"><span class="qlabel">${label}</span><div class="dur" aria-label="${label}">${[[30,'30m'],[60,'1h'],[90,'1½h'],[120,'2h'],[180,'3h'],[240,'4h'],[300,'5h'],[360,'6h'],[420,'7h'],[480,'8h']].map(([m,l])=>`<button type="button" data-action="dur" data-m="${m}">${l}</button>`).join('')}</div></div>`;}
 function setDur(form,name,mins){mins=Math.max(0,Math.round(Number(mins)||0));const hid=form.elements[name];if(!hid)return;hid.value=mins||'';
   const hh=form.querySelector(`[data-hm=h][data-for="${name}"]`),mm=form.querySelector(`[data-hm=m][data-for="${name}"]`);
   if(hh)hh.value=mins?Math.floor(mins/60):'';if(mm)mm.value=mins?mins%60:'';}
@@ -308,7 +314,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-1';let updateWaiting=null;
+const APP_VERSION='2026-10-15-3';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -316,6 +322,13 @@ function applyUpdate(v){
   const n=$('#note');n.innerHTML='A new version of the app is ready. <button class="btn small" data-action="reload-app">Reload now</button>';
 }
 
+async function checkUpdate(){
+  if(location.protocol==='file:')return;
+  try{const r=await fetch('./?v='+Date.now(),{cache:'no-store'});const t=await r.text();const m=t.match(/APP_VERSION='([^']+)'/);
+    if(m&&m[1]!==APP_VERSION)applyUpdate(m[1]);}catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')checkUpdate();});
+window.addEventListener('pageshow',()=>checkUpdate());setInterval(checkUpdate,30*60*1000);
 /* ---------- storage adapters ---------- */
 const SB_URL='https://vrhxjbureynpkrohbnww.supabase.co',SB_KEY='sb_publishable_1GrmYyopoMB1bNIldUpI4w_wKQfw0_z';
 const TABLE={customers:'customers',visits:'visits',schedule:'schedule_items',invoices:'invoices'};
@@ -540,6 +553,7 @@ function openApptForm(p){
   ${pf?`<p class="muted" style="margin-top:4px">Part ${partNo} of ${esc(c.name||'')}’s job from ${shortDate(pf.date)}. The regular schedule stays the same, and on the invoice the hours are added to that job.</p>`:''}
   <label class="f">Customer</label>${custPick('customerId',cid,'',!!o||!!pf)}
   <label class="f">Date<input type="date" name="date" required value="${esc(date)}"></label>
+  ${quickDur('How long?')}
   <div class="row2"><label class="f">Start <span class="hint">optional</span><input type="time" name="start" value="${esc(start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(start?addMins(start,dur):'')}"></label></div>
   ${hmBox('duration',dur,'Length','finish works this out')}
   <fieldset class="f"><legend>Line items for this visit <span class="hint">e.g. weed spraying, plants; added to the visit when you log it</span></legend><div id="apptRows">${items.map(matRow).join('')}</div>
@@ -912,7 +926,7 @@ const VIEWS={schedule:viewSchedule,visits:viewVisits,invoice:viewInvoice,custome
 
 /* ---------- sheets ---------- */
 function openSheet(html){const sh=$('#sheet');sh.innerHTML=`<div class="sheet-back" data-action="close-sheet"></div><div class="sheet-panel" role="dialog" aria-modal="true">${html}</div>`;sh.hidden=false;document.body.classList.add('locked');}
-function closeSheet(){const sh=$('#sheet');sh.hidden=true;sh.innerHTML='';document.body.classList.remove('locked');if(pending)render();}
+function closeSheet(){const sh=$('#sheet');sh.hidden=true;sh.innerHTML='';document.body.classList.remove('locked');if(pending)render();if(updateWaiting){const v=updateWaiting;updateWaiting=null;applyUpdate(v);}}
 const head=t=>`<div class="sheet-head"><h2>${t}</h2><button type="button" class="icon" data-action="close-sheet" aria-label="Close">×</button></div>`;
 function taskChips(all,selected){return `<div class="chips">${all.map(t=>`<label class="chip"><input type="checkbox" name="task" value="${esc(t)}"${selected.includes(t)?' checked':''}><span>${esc(t)}</span></label>`).join('')}</div>`;}
 const uniq=a=>[...new Set(a.filter(Boolean))];
@@ -977,9 +991,9 @@ function openVisitForm(o){
   openSheet(`<form id="visitForm" data-id="${esc(ex?ex.id:'')}" data-timer="${o.fromTimer?'1':''}" data-lt="${lt}">${head(ex?'Edit visit':'Log a visit')}<input type="hidden" name="scheduledKey" value="${esc(v.scheduledKey||'')}"><input type="hidden" name="partOf" value="${esc(v.partOf||'')}">${v.partOf?`<p class="muted" style="margin-top:4px">Finishing the job from ${shortDate(jobDate(v.partOf))}. On the invoice the hours are added to that job.</p>`:''}
   <label class="f">Customer</label>${custPick('customerId',v.customerId,'vf-customer')}
   <label class="f">Date<input type="date" name="date" required value="${esc(v.date)}"></label>
+  ${quickDur('How long?')}
   <div class="row2"><label class="f">Start<input type="time" name="start" value="${esc(v.start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(v.end)}"></label></div>
   ${hmBox('minutes',v.minutes,'Time taken','fills in from start and finish')}
-  <div class="dur" aria-label="Quick time"><span class="hint" style="align-self:center">How long:</span>${[[30,'30m'],[60,'1h'],[90,'1½h'],[120,'2h'],[180,'3h'],[240,'4h'],[360,'6h']].map(([m,l])=>`<button type="button" data-action="dur" data-m="${m}">${l}</button>`).join('')}</div>
   <fieldset class="f"><legend>Work done</legend>${taskChips(known,v.tasks||[])}<input name="otherTask" placeholder="Other work (optional)" aria-label="Other work"></fieldset>
   <fieldset class="f"><legend>Labour charge</legend><div class="chips">
   <label class="chip"><input type="radio" name="labourType" value="hourly"${lt==='hourly'?' checked':''}><span>By the hour</span></label>
@@ -1240,10 +1254,11 @@ document.addEventListener('click',async e=>{
     case 'toggle-paused':S.showPaused=!S.showPaused;$('#custList').innerHTML=custListHtml($('#custSearch')?$('#custSearch').value:'');break;
     case 'add-extra':{syncExtras();(S.inv.extras=S.inv.extras||[]).push({name:'',qty:1,price:''});render(true);const r=$('#invExtras')?.lastElementChild;r&&r.querySelector('input').focus();break;}
     case 'remove-mat':{const box=a.closest('#invExtras'),f=a.closest('#visitForm'),af=a.closest('#apptForm');a.closest('.mat-row').remove();if(f)updateVisitCalc(f);if(af)updateApptSum(af);if(box){syncExtras();render(true);}break;}
-    case 'dur':{const f=$('#visitForm'),el=f.elements,m=Number(a.dataset.m);
+    case 'dur':{const f=a.closest('form'),el=f.elements,m=Number(a.dataset.m),dn=f.id==='apptForm'?'duration':'minutes';
       if(el.start.value)el.end.value=addMins(el.start.value,m);
-      else{const d=new Date(),nowM=Math.floor((d.getHours()*60+d.getMinutes())/5)*5;el.end.value=`${pad(Math.floor(nowM/60))}:${pad(nowM%60)}`;el.start.value=addMins(el.end.value,-m);}
-      setDur(f,'minutes',m);updateVisitCalc(f);break;}
+      else if(f.id==='visitForm'){const d=new Date(),nowM=Math.floor((d.getHours()*60+d.getMinutes())/5)*5;el.end.value=`${pad(Math.floor(nowM/60))}:${pad(nowM%60)}`;el.start.value=addMins(el.end.value,-m);}
+      setDur(f,dn,m);f.querySelectorAll('[data-action=dur]').forEach(x=>x.setAttribute('aria-pressed',x===a?'true':'false'));
+      if(f.id==='visitForm')updateVisitCalc(f);break;}
     case 'start-timer':
       try{await saveSettings({...clone(S.settings),timer:{customerId:id,start:new Date().toISOString(),scheduledKey:a.dataset.key||''}});closeSheet();toast('Timer started');}catch(err){toast('The timer didn’t start. Try again.');}
       break;
@@ -1333,6 +1348,7 @@ document.addEventListener('input',e=>{
   if(e.target.name==='mname')openPicker(e.target);
   if(e.target.closest&&e.target.closest('#invExtras'))syncExtras();
   if(f&&e.target.dataset&&e.target.dataset.hm)readDur(f,e.target.dataset.for);
+  if(f&&['start','end'].includes(e.target.name)||e.target.dataset&&e.target.dataset.hm)f&&f.querySelectorAll('[data-action=dur][aria-pressed=true]').forEach(x=>x.setAttribute('aria-pressed','false'));
   if(f&&f.id==='visitForm')updateVisitCalc(f,e.target);
   if(f&&f.id==='apptForm'){timeLink(f,e.target,'duration');updateApptSum(f);}
   if(f&&f.id==='custForm'&&e.target.name==='pricing')f.dataset.pr=e.target.value;
