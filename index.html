@@ -93,6 +93,8 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .hm-field{margin-top:14px}
 .part-row{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 10px;margin-top:8px}
 .pr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
+.p-save{margin-top:8px;font-weight:400}
+.p-save[hidden]{display:none}
 .pr-charge{margin:8px 0 2px;font-size:.88rem;color:var(--muted);font-weight:600}
 .charge{margin-top:12px}
 .p-items .mat-row{margin-top:6px}
@@ -328,7 +330,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-8';let updateWaiting=null;
+const APP_VERSION='2026-10-15-9';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -559,7 +561,7 @@ function chargeFor(cid,mins,items,mainOnly){
 function chargeHtml(ch,title){return `${ch.warn?`<div class="warnbox">${esc(ch.warn)}</div>`:''}<div class="totals charge">${ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}<div class="grand"><span>${title||'Charge for this visit'}</span><span>${gbp(ch.total)}</span></div></div>`;}
 function itemsTotal(items){return r2((items||[]).reduce((t,m)=>t+(Number(m.qty)||0)*(Number(m.price)||0),0));}
 function readItems(box){return [...box.querySelectorAll('.mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||0,price:parseFloat(r.querySelector('[name=mprice]').value)||0})).filter(m=>m.name);}
-function saveNewHtml(){return `<label class="save-new"><input type="checkbox" name="saveNew" checked> Save new items to my list as <select name="saveAs" aria-label="Save as"><option value="services">services</option><option value="materials">products</option></select></label>`;}
+function saveNewHtml(){return `<label class="save-new"><input type="checkbox" name="saveNew" checked> Add new items to services and products as <select name="saveAs" aria-label="Save as"><option value="services">services</option><option value="materials">products</option></select></label>`;}
 async function saveNewItems(form,items){
   const fd=new FormData(form);if(fd.get('saveNew')!=='on')return;
   const known=new Set(catalogue().map(x=>x.name.toLowerCase())),fresh=[];
@@ -572,6 +574,7 @@ function partRow(x){const d=x.duration||60,dis=x.done?' disabled':'';
   return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:x.fixed?'':`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
   ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`
   <label class="f" style="margin-top:4px">What for?</label><div class="pick-wrap"><input name="ptask" autocomplete="off" placeholder="Main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${dis}></div>
+  <label class="check p-save" hidden><input type="checkbox" name="psave" checked> <span>Add to services and products</span></label>
   <div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${dis}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${dis}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${dis}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${dis}><span>m</span></span></div>
   <div class="p-items">${(x.items||[]).map(matRow).join('')}</div>
   ${x.done?'':`<button type="button" class="btn small" data-action="part-add-item" style="margin-top:8px">+ Add line item</button>`}
@@ -595,17 +598,20 @@ async function saveParts(form,cid){
   for(const id of (form.dataset.removed||'').split(',').filter(Boolean))await store.remove('schedule',id);
   for(const r of box.querySelectorAll('.part-row')){const date=r.querySelector('[name=pdate]');if(!date||date.disabled||!date.value)continue;
     const id=r.dataset.id||newId(),prev=S.schedule.find(e=>e.id===id)||{},pt=readPart(r);
-    const part=prev.part||++n;if(pt.task)newTasks.push(pt.task);allItems.push(...pt.items);
+    const part=prev.part||++n;if(pt.task&&r.querySelector('[name=psave]').checked)newTasks.push(pt.task);allItems.push(...pt.items);
     await store.put('schedule',id,{...prev,id:undefined,customerId:cid,kind:'extra',date:pt.date,start:pt.start,duration:pt.dur||60,partOf:root,part,task:pt.task,items:pt.items,notes:prev.notes||''});}
   const known=new Set(catalogue().map(x=>x.name.toLowerCase())),fresh=uniq(newTasks).filter(t=>!known.has(t.toLowerCase()));
-  if(fresh.length){const next=clone(S.settings);next.tasks=[...(next.tasks||[]),...fresh];await saveSettings(next);}
+  if(fresh.length){const next=clone(S.settings);next.services=[...(next.services||[]),...fresh.map(name=>({name,price:0}))];await saveSettings(next);}
   if(allItems.length)await saveNewItems(form,allItems);
 }
 function updateApptSum(form){
   const cid=form.elements.customerId&&form.elements.customerId.value;if(!cid)return;
   const main=chargeFor(cid,Number(form.elements.duration.value)||0,readItems($('#apptRows')||form));
   const parts=[];
+  const known=new Set(catalogue().map(x=>x.name.toLowerCase()));
   form.querySelectorAll('.part-row').forEach(r=>{const out=r.querySelector('.pr-charge');if(!out)return;const pt=readPart(r),ch=chargeFor(cid,pt.dur,pt.items);
+    const ps=r.querySelector('.p-save');if(ps){const isNew=!!pt.task&&!known.has(pt.task.toLowerCase())&&!r.querySelector('[name=ptask]').disabled;ps.hidden=!isNew;
+      if(isNew)ps.querySelector('span').textContent=`Add “${pt.task}” to services and products`;}
     out.textContent=`${ch.rows.map(x=>`${x[0]} = ${gbp(x[1])}`).join(' + ')}${ch.rows.length>1?`; total ${gbp(ch.total)}`:''}`;
     parts.push({label:`${r.querySelector('.pr-top strong').textContent}${pt.task?`: ${pt.task}`:''}${pt.date?`, ${shortDate(pt.date)}`:''}`,ch});});
   const el=$('#apptSum');if(!el)return;
@@ -1176,7 +1182,7 @@ function openPicker(input){
   if(q&&!items.some(x=>x.name.toLowerCase()===q))items.unshift({name:input.value.trim(),price:0,group:inPart?'New task':'New item',isNew:true});
   let html='',g='';
   items.forEach((x,i)=>{if(x.group!==g){g=x.group;html+=`<h4>${esc(g)}</h4>`;}
-    html+=`<button type="button" role="option" data-pick="${i}" aria-selected="${i===0&&q?'true':'false'}"><span>${x.isNew?`+ Add “${esc(x.name)}”`:esc(x.name)}</span><span>${x.isNew?(inPart?'saved to your list':'add your price'):inPart&&!x.price?'':x.price?gbp(x.price):'price on the day'}</span></button>`;});
+    html+=`<button type="button" role="option" data-pick="${i}" aria-selected="${i===0&&q?'true':'false'}"><span>${x.isNew?`+ Add “${esc(x.name)}”`:esc(x.name)}</span><span>${x.isNew?(inPart?'':'add your price'):inPart&&!x.price?'':x.price?gbp(x.price):'price on the day'}</span></button>`;});
   if(!items.length)html=`<div class="none">${inPart?`New task: “${esc(input.value.trim())}” will be saved to your list.`:`Nothing matches. Keep typing to add “${esc(input.value.trim())}” as a one-off.`}</div>`;
   if(!q)html+=`<div class="none">${inPart?'Or type a new task; it’s saved to your list.':`Type to search ${catalogue().length} products and services.`}</div>`;
   panel.innerHTML=html;panel.hidden=false;input.setAttribute('aria-expanded','true');
