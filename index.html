@@ -90,6 +90,13 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .chip input:focus-visible+span{outline:3px solid var(--fern);outline-offset:2px}
 .check{display:flex;gap:10px;align-items:center;margin-top:14px;font-size:.95rem}
 .mat-row{display:grid;grid-template-columns:1fr 62px 86px 44px;gap:6px;align-items:end}
+.hm-field{margin-top:14px}
+.hm{display:flex;align-items:center;gap:6px;margin-top:6px}
+.hm input{width:72px;margin-top:0;text-align:center}
+.hm span{font-weight:600;color:var(--muted)}
+.save-new{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;font-size:.92rem;font-weight:400}
+.save-new select{width:auto;margin-top:0;min-height:40px;padding:6px 10px}
+.items-sum{margin-top:8px;font-size:.92rem;color:var(--muted)}
 form[data-lt="hourly"] .only-fixed,form[data-lt="fixed"] .only-hourly,
 form[data-pr="hourly"] .only-fixed,form[data-pr="fixed"] .only-hourly,
 form[data-lt="contract"] .only-hourly,form[data-lt="contract"] .only-fixed,
@@ -282,6 +289,13 @@ function addMonths(s,n){const [y,m,d]=s.split('-').map(Number);const last=new Da
 function daysBetween(a,b){return Math.round((toUTC(b)-toUTC(a))/864e5);}
 function niceDate(s,o){return new Date(toUTC(s)).toLocaleDateString('en-GB',{...(o||{day:'numeric',month:'short'}),timeZone:'UTC'});}
 function minsBetween(a,b){if(!a||!b)return 0;const[h1,m1]=a.split(':').map(Number),[h2,m2]=b.split(':').map(Number);let m=(h2*60+m2)-(h1*60+m1);if(m<0)m+=1440;return m;}
+function hmBox(name,mins,label,hint){mins=Math.max(0,Math.round(Number(mins)||0));const h=Math.floor(mins/60),m=mins%60;
+  return `<div class="f hm-field"><label class="f" style="margin:0" for="hm-${name}">${label}${hint?` <span class="hint">${hint}</span>`:''}</label><div class="hm"><input id="hm-${name}" type="number" data-hm="h" data-for="${name}" min="0" max="23" inputmode="numeric" value="${mins?h:''}" placeholder="0" aria-label="${label}, hours"><span>h</span><input type="number" data-hm="m" data-for="${name}" min="0" max="59" step="5" inputmode="numeric" value="${mins?m:''}" placeholder="0" aria-label="${label}, minutes"><span>m</span></div><input type="hidden" name="${name}" value="${mins||''}"></div>`;}
+function setDur(form,name,mins){mins=Math.max(0,Math.round(Number(mins)||0));const hid=form.elements[name];if(!hid)return;hid.value=mins||'';
+  const hh=form.querySelector(`[data-hm=h][data-for="${name}"]`),mm=form.querySelector(`[data-hm=m][data-for="${name}"]`);
+  if(hh)hh.value=mins?Math.floor(mins/60):'';if(mm)mm.value=mins?mins%60:'';}
+function readDur(form,name){const hh=form.querySelector(`[data-hm=h][data-for="${name}"]`),mm=form.querySelector(`[data-hm=m][data-for="${name}"]`);
+  const v=(parseInt(hh&&hh.value,10)||0)*60+(parseInt(mm&&mm.value,10)||0);form.elements[name].value=v||'';return v;}
 function fmtMins(m){m=Math.round(m||0);if(!m)return '0m';const h=Math.floor(m/60),r=m%60;return h?`${h}h${r?` ${r}m`:''}`:`${r}m`;}
 const r2=x=>Math.round((Number(x)||0)*100)/100;
 
@@ -293,7 +307,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-06-1';let updateWaiting=null;
+const APP_VERSION='2026-10-15-1';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -312,15 +326,25 @@ function makeSupabaseStore(sb,uid){
     for(const r of data)m.set(r.id,{...r.data,id:r.id});if(data.length<1000)break;from+=1000;}cache[k]=m;emit(k);}
   return{kind:'cloud',
     async watch(handlers,onErr){h=handlers;
-      const ch=sb.channel('lg-'+uid);
-      for(const k of Object.keys(TABLE))ch.on('postgres_changes',{event:'*',schema:'public',table:TABLE[k],filter:`owner_id=eq.${uid}`},p=>{
-        if(p.eventType==='DELETE'){if(p.old&&p.old.id)cache[k].delete(p.old.id);}else cache[k].set(p.new.id,{...p.new.data,id:p.new.id});emit(k);});
-      ch.on('postgres_changes',{event:'*',schema:'public',table:'settings',filter:`owner_id=eq.${uid}`},p=>{if(p.new&&p.new.data){settings=p.new.data;h.settings(settings);}});
-      ch.subscribe(st=>{if(st==='CHANNEL_ERROR'||st==='TIMED_OUT')onErr&&onErr();});
-      try{await Promise.all([...Object.keys(TABLE).map(load),
-        sb.from('settings').select('data').maybeSingle().then(({data,error})=>{if(error)throw error;settings=data?data.data:null;h.settings(settings);})]);}
-      catch(e){onErr&&onErr(e);}
-      document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')Object.keys(TABLE).forEach(k=>load(k).catch(()=>{}));});
+      let ch=null,gen=0,retry=null,wait=2000,down=false;
+      const reloadAll=()=>Promise.all([...Object.keys(TABLE).map(load),
+        sb.from('settings').select('data').maybeSingle().then(({data,error})=>{if(error)throw error;settings=data?data.data:null;h.settings(settings);})]);
+      const connect=()=>{const my=++gen;
+        if(ch){try{sb.removeChannel(ch);}catch(e){}}
+        ch=sb.channel('lg-'+uid+'-'+my);
+        for(const k of Object.keys(TABLE))ch.on('postgres_changes',{event:'*',schema:'public',table:TABLE[k],filter:`owner_id=eq.${uid}`},p=>{
+          if(p.eventType==='DELETE'){if(p.old&&p.old.id)cache[k].delete(p.old.id);}else cache[k].set(p.new.id,{...p.new.data,id:p.new.id});emit(k);});
+        ch.on('postgres_changes',{event:'*',schema:'public',table:'settings',filter:`owner_id=eq.${uid}`},p=>{if(p.new&&p.new.data){settings=p.new.data;h.settings(settings);}});
+        ch.subscribe(st=>{if(my!==gen)return;
+          if(st==='SUBSCRIBED'){wait=2000;if(down){down=false;reloadAll().catch(()=>{});}}
+          else if(st==='CHANNEL_ERROR'||st==='TIMED_OUT'||st==='CLOSED'){down=true;later();}});};
+      const later=()=>{if(retry)return;retry=setTimeout(()=>{retry=null;if(document.visibilityState==='visible'&&navigator.onLine!==false)connect();else down=true;},wait);wait=Math.min(wait*2,30000);};
+      const wake=()=>{if(document.visibilityState!=='visible')return;reloadAll().catch(()=>{});
+        if(down||!ch||ch.state==='closed'||ch.state==='errored'){clearTimeout(retry);retry=null;wait=2000;connect();}};
+      connect();
+      try{await reloadAll();}
+      catch(e){if(e&&/not allowed|permission|JWT|row-level/i.test(e.message||''))onErr&&onErr(e);else{down=true;later();}}
+      document.addEventListener('visibilitychange',wake);window.addEventListener('online',wake);window.addEventListener('focus',wake);
     },
     async put(k,id,o){const{id:_,...d}=clone(o);cache[k].set(id,{...d,id});emit(k);
       const{error}=await sb.from(TABLE[k]).upsert({owner_id:uid,id,data:d},{onConflict:'owner_id,id'});if(error)throw error;},
@@ -417,8 +441,8 @@ function occurrencesInRange(a,b){
   }
   for(const e of S.schedule){
     if(e.date<a||e.date>b||!S.customers[e.customerId])continue;
-    if(e.kind==='moved')push({key:`r:${e.customerId}:${e.originalDate}`,kind:'regular',moved:true,customerId:e.customerId,origDate:e.originalDate,date:e.date,start:e.start,duration:e.duration,exId:e.id,notes:e.notes});
-    else if(e.kind==='extra')push({key:`x:${e.id}`,kind:'extra',customerId:e.customerId,date:e.date,start:e.start,duration:e.duration,exId:e.id,notes:e.notes});
+    if(e.kind==='moved')push({key:`r:${e.customerId}:${e.originalDate}`,kind:'regular',moved:e.date!==e.originalDate,edited:true,customerId:e.customerId,origDate:e.originalDate,date:e.date,start:e.start,duration:e.duration,exId:e.id,notes:e.notes,items:e.items||[]});
+    else if(e.kind==='extra')push({key:`x:${e.id}`,kind:'extra',customerId:e.customerId,date:e.date,start:e.start,duration:e.duration,exId:e.id,notes:e.notes,items:e.items||[]});
   }
   return out.sort((x,y)=>x.date.localeCompare(y.date)||(x.start||'99').localeCompare(y.start||'99')||custName(x.customerId).localeCompare(custName(y.customerId)));
 }
@@ -434,7 +458,7 @@ function shiftCal(n){const d=calDate(),v=S.cal.view;if(v==='day')return addDays(
 function apptCard(o,showDate){
   const c=S.customers[o.customerId]||{};
   const time=o.start?`${o.start}–${addMins(o.start,o.duration)}`:'Any time';
-  const flag={completed:'Done',missed:'Not logged',skipped:'Skipped'}[o.status]||(o.kind==='extra'?'Extra visit':o.moved?'Moved':'');
+  const flag={completed:'Done',missed:'Not logged',skipped:'Skipped'}[o.status]||(o.kind==='extra'?'Extra visit':o.moved?'Moved':(o.items||[]).length?'Extras':'');
   return `<button class="appt ${o.status}${o.kind==='extra'?' extra':''}" data-action="open-occ" data-key="${esc(o.key)}"><span class="t">${showDate?niceDate(o.date,{weekday:'short',day:'numeric',month:'short'})+', ':''}${time}${flag?` <span class="flag">${flag}</span>`:''}</span><strong>${esc(c.name||'Removed customer')}</strong>${c.address?`<span class="sub">${esc(c.address.split('\n')[0])}</span>`:''}</button>`;
 }
 function viewSchedule(){
@@ -470,7 +494,7 @@ function openOccurrence(key){
   let act;
   if(o.status==='completed')act=`<button class="btn primary" data-action="edit-visit" data-id="${esc(o.visitId)}">View visit</button>`;
   else if(o.status==='skipped')act=`<button class="btn" data-action="restore-occ" data-key="${esc(key)}">Put back on schedule</button>`;
-  else act=`<button class="btn primary" data-action="log-occ" data-key="${esc(key)}">Log visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn" data-action="move-occ" data-key="${esc(key)}">Reschedule</button><button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
+  else act=`<button class="btn primary" data-action="log-occ" data-key="${esc(key)}">Log visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule</button><button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
   openSheet(`${head(esc(c.name||'Visit'))}<div class="detail">
   <p><strong>${niceDate(o.date,{weekday:'long',day:'numeric',month:'long'})}</strong>, ${time}</p>
   <p class="muted">${st}${o.kind==='extra'?', extra visit':o.moved?`, moved from ${niceDate(o.origDate,{weekday:'short',day:'numeric',month:'short'})}`:''}</p>
@@ -478,33 +502,53 @@ function openOccurrence(key){
   ${phone?`<p><a href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a></p>`:''}
   ${(c.tasks||[]).length?`<p><span class="muted">Usual jobs:</span> ${esc(c.tasks.join(', '))}</p>`:''}
   ${o.notes?`<p><span class="muted">Visit note:</span> ${esc(o.notes)}</p>`:''}
+  ${(o.items||[]).length?`<div class="totals" style="margin-top:10px">${o.items.map(m=>`<div><span>${esc(m.name)}${m.qty!==1?` x ${fmtNum(m.qty)}`:''}</span><span>${m.price?gbp(r2(m.qty*m.price)):'price on the day'}</span></div>`).join('')}<div class="grand"><span>Line items for this visit</span><span>${gbp(itemsTotal(o.items))}</span></div></div>`:''}
   ${c.notes?`<p><span class="muted">Customer notes:</span> ${esc(c.notes)}</p>`:''}
   </div><div class="actions">${act}<button class="btn" data-action="edit-customer" data-id="${esc(o.customerId)}">Customer details</button></div>`);
 }
+function itemsTotal(items){return r2((items||[]).reduce((t,m)=>t+(Number(m.qty)||0)*(Number(m.price)||0),0));}
+function readItems(box){return [...box.querySelectorAll('.mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||0,price:parseFloat(r.querySelector('[name=mprice]').value)||0})).filter(m=>m.name);}
+function saveNewHtml(){return `<label class="save-new"><input type="checkbox" name="saveNew" checked> Save new items to my list as <select name="saveAs" aria-label="Save as"><option value="services">services</option><option value="materials">products</option></select></label>`;}
+async function saveNewItems(form,items){
+  const fd=new FormData(form);if(fd.get('saveNew')!=='on')return;
+  const known=new Set(catalogue().map(x=>x.name.toLowerCase())),fresh=[];
+  for(const m of items){const k=m.name.toLowerCase();if(!known.has(k)){known.add(k);fresh.push({name:m.name,price:m.price||0});}}
+  if(!fresh.length)return;const as=fd.get('saveAs')==='materials'?'materials':'services';
+  const next=clone(S.settings);next[as]=[...(next[as]||[]),...fresh];
+  try{await saveSettings(next);}catch(e){}
+}
+function updateApptSum(form){const el=$('#apptSum');if(!el)return;const it=readItems(form);el.textContent=it.length?`Line items: ${gbp(itemsTotal(it))}`:'';}
 function openApptForm(p){
   const custs=sortedCustomers();if(!custs.length){toast('Add a customer first.');return openCustomerForm();}
   const o=p.key?findOcc(p.key):null;
   const cid=o?o.customerId:(p.customerId||custs[0].id),c=S.customers[cid]||{};
   const date=o?o.date:(p.date||todayStr()),start=o?o.start:(c.startTime||''),dur=o?o.duration:(c.duration||60);
-  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}">${head(o?'Reschedule visit':'Schedule a visit')}
+  const items=o&&o.items||[];
+  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}">${head(o?'Edit or reschedule visit':'Schedule a visit')}
   <label class="f">Customer</label>${custPick('customerId',cid,'',!!o)}
   <label class="f">Date<input type="date" name="date" required value="${esc(date)}"></label>
-  <div class="row2"><label class="f">Start <span class="hint">optional</span><input type="time" name="start" value="${esc(start)}"></label><label class="f">Length (mins)<input type="number" name="duration" min="15" step="15" inputmode="numeric" value="${esc(dur)}"></label></div>
+  <div class="row2"><label class="f">Start <span class="hint">optional</span><input type="time" name="start" value="${esc(start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(start?addMins(start,dur):'')}"></label></div>
+  ${hmBox('duration',dur,'Length','finish works this out')}
+  <fieldset class="f"><legend>Line items for this visit <span class="hint">e.g. weed spraying, plants; added to the visit when you log it</span></legend><div id="apptRows">${items.map(matRow).join('')}</div>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-item">+ Add line item</button></div><div class="items-sum" id="apptSum"></div>${saveNewHtml()}</fieldset>
   <label class="f">Note for this visit<textarea name="notes" rows="2">${esc(o&&o.notes||'')}</textarea></label>
   ${o?'':`<p class="muted" style="margin-top:10px">For one-off and extra visits. Regular visits appear automatically from each customer’s schedule.</p>`}
-  <div class="actions"><button class="btn primary" type="submit">${o?'Save new time':'Add to schedule'}</button></div></form>`);
+  <div class="actions"><button class="btn primary" type="submit">${o?'Save changes':'Add to schedule'}</button></div></form>`);
+  updateApptSum($('#apptForm'));
 }
 async function saveAppt(form){
   const fd=new FormData(form),key=form.dataset.key,o=key?findOcc(key):null;
   const cid=o?o.customerId:fd.get('customerId'),date=fd.get('date');
   if(!cid||!date)return toast('Choose a customer and a date.');
-  const body={customerId:cid,date,start:fd.get('start')||'',duration:parseInt(fd.get('duration'),10)||60,notes:(fd.get('notes')||'').trim()};
+  const items=readItems(form);
+  const body={customerId:cid,date,start:fd.get('start')||'',duration:readDur(form,'duration')||60,notes:(fd.get('notes')||'').trim(),items};
   let id;
   if(o&&o.kind==='extra'){id=o.exId;body.kind='extra';}
   else if(o){id=`${cid}_${o.origDate}`;body.kind='moved';body.originalDate=o.origDate;}
   else{id=newId();body.kind='extra';}
   S.cal.date=date;
-  await persist(form,()=>store.put('schedule',id,body),o?'Visit rescheduled':'Visit added to the schedule');
+  await saveNewItems(form,items);
+  await persist(form,()=>store.put('schedule',id,body),o?(o.date!==date||o.start!==body.start?'Visit updated and moved':'Visit updated'):'Visit added to the schedule');
 }
 
 function viewVisits(){
@@ -861,9 +905,9 @@ function openCustomerForm(id){
   <div class="row2"><label class="f">How often<select name="frequency">${Object.entries(FREQ).map(([k,f])=>`<option value="${k}"${c.frequency===k?' selected':''}>${f.l}</option>`).join('')}</select></label>
   <label class="f">Status<select name="status"><option value="active"${c.status!=='paused'?' selected':''}>Active</option><option value="paused"${c.status==='paused'?' selected':''}>Paused</option></select></label></div>
   <fieldset class="f"><legend>Regular visit</legend>
-  <div class="row3"><label class="f">Day<select name="day"><option value="">Any day</option>${DAYS.map((d,i)=>`<option value="${i}"${String(c.day)===String(i)?' selected':''}>${d}</option>`).join('')}</select></label>
+  <div class="row2"><label class="f">Day<select name="day"><option value="">Any day</option>${DAYS.map((d,i)=>`<option value="${i}"${String(c.day)===String(i)?' selected':''}>${d}</option>`).join('')}</select></label>
   <label class="f">Start<input name="startTime" type="time" value="${esc(c.startTime||'')}"></label>
-  <label class="f">Length (mins)<input name="duration" type="number" inputmode="numeric" min="15" step="15" value="${esc(c.duration||60)}"></label></div>
+  </div>${hmBox('duration',c.duration||60,'Usual length')}
   <label class="f">Schedule runs from <span class="hint">first visit of the pattern; later visits repeat from this date</span><input name="nextDue" type="date" value="${esc(c.nextDue)}"></label></fieldset>
   <fieldset class="f"><legend>How you charge</legend><div class="chips">
   <label class="chip"><input type="radio" name="pricing" value="hourly"${pr==='hourly'?' checked':''}><span>By the hour</span></label>
@@ -902,7 +946,7 @@ function openVisitForm(o){
   if(ex)v=clone(ex);
   else{const c=S.customers[o.customerId]||custs.find(isActive)||custs[0];
     v={customerId:c.id,date:o.date||todayStr(),start:o.start||'',end:o.end||'',minutes:o.start&&o.end?minsBetween(o.start,o.end):'',
-      tasks:(c.tasks||[]).slice(),materials:[],labourType:ltFor(c),
+      tasks:(c.tasks||[]).slice(),materials:clone(o.materials||[]),labourType:ltFor(c),
       rate:c.rate!==''&&c.rate!=null?c.rate:S.settings.hourlyRate,fixedPrice:c.price??'',notes:'',invoiced:false,scheduledKey:o.scheduledKey||''};}
   const lt=['fixed','contract'].includes(v.labourType)?v.labourType:'hourly';
   const isContract=S.customers[v.customerId]?.pricing==='monthly'||lt==='contract';
@@ -910,7 +954,8 @@ function openVisitForm(o){
   openSheet(`<form id="visitForm" data-id="${esc(ex?ex.id:'')}" data-timer="${o.fromTimer?'1':''}" data-lt="${lt}">${head(ex?'Edit visit':'Log a visit')}<input type="hidden" name="scheduledKey" value="${esc(v.scheduledKey||'')}">
   <label class="f">Customer</label>${custPick('customerId',v.customerId,'vf-customer')}
   <label class="f">Date<input type="date" name="date" required value="${esc(v.date)}"></label>
-  <div class="row3"><label class="f">Start<input type="time" name="start" value="${esc(v.start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(v.end)}"></label><label class="f">Minutes<input type="number" name="minutes" inputmode="numeric" min="0" value="${esc(v.minutes)}"></label></div>
+  <div class="row2"><label class="f">Start<input type="time" name="start" value="${esc(v.start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(v.end)}"></label></div>
+  ${hmBox('minutes',v.minutes,'Time taken','fills in from start and finish')}
   <div class="dur" aria-label="Quick time"><span class="hint" style="align-self:center">How long:</span>${[[30,'30m'],[60,'1h'],[90,'1½h'],[120,'2h'],[180,'3h'],[240,'4h'],[360,'6h']].map(([m,l])=>`<button type="button" data-action="dur" data-m="${m}">${l}</button>`).join('')}</div>
   <fieldset class="f"><legend>Work done</legend>${taskChips(known,v.tasks||[])}<input name="otherTask" placeholder="Other work (optional)" aria-label="Other work"></fieldset>
   <fieldset class="f"><legend>Labour charge</legend><div class="chips">
@@ -920,7 +965,7 @@ function openVisitForm(o){
   <label class="f only-hourly">Hourly rate (£)<input name="rate" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(v.rate)}"></label>
   <label class="f only-fixed">Price for this visit (£)<input name="fixedPrice" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(v.fixedPrice)}"></label></fieldset>
   <fieldset class="f"><legend>Extras: products and services <span class="hint">pick from the list or type your own; leave empty if none</span></legend><div id="matRows">${(v.materials||[]).map(matRow).join('')}</div>
-  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-mat">+ Add an extra</button></div></fieldset>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-mat">+ Add an extra</button></div>${saveNewHtml()}</fieldset>
   <label class="f">Notes<textarea name="notes" rows="2">${esc(v.notes)}</textarea></label>
   ${ex?`<label class="check"><input type="checkbox" name="invoiced"${v.invoiced?' checked':''}> Invoiced</label>`:''}
   <div class="totals" id="vfTotals"></div>
@@ -1021,6 +1066,7 @@ function choosePick(i){
 }
 function afterRowChange(el){
   if(el.closest('#visitForm'))updateVisitCalc($('#visitForm'));
+  if(el.closest('#apptForm'))updateApptSum($('#apptForm'));
   if(el.closest('#invExtras'))syncExtras();
 }
 function syncExtras(){
@@ -1090,9 +1136,16 @@ function readVisit(form){
     tasks:uniq(tasks),materials,labourType:['fixed','contract'].includes(fd.get('labourType'))?fd.get('labourType'):'hourly',rate:parseFloat(fd.get('rate'))||0,fixedPrice:parseFloat(fd.get('fixedPrice'))||0,
     notes:(fd.get('notes')||'').trim(),invoiced:fd.get('invoiced')==='on',scheduledKey:fd.get('scheduledKey')||''};
 }
+function timeLink(form,target,durName){
+  const el=form.elements,st=el.start,en=el.end;if(!st||!en)return;
+  const hm=target.dataset&&target.dataset.hm&&target.dataset.for===durName;
+  if(hm){const m=readDur(form,durName);if(st.value&&m)en.value=addMins(st.value,m);return;}
+  if(target===en){if(st.value&&en.value)setDur(form,durName,minsBetween(st.value,en.value));return;}
+  if(target===st&&st.value){const m=Number(el[durName].value)||0;if(m)en.value=addMins(st.value,m);else if(en.value)setDur(form,durName,minsBetween(st.value,en.value));}
+}
 function updateVisitCalc(form,target){
   const el=form.elements;
-  if(target&&(target.name==='start'||target.name==='end')&&el.start.value&&el.end.value)el.minutes.value=minsBetween(el.start.value,el.end.value);
+  if(target)timeLink(form,target,'minutes');
   const v=readVisit(form),t=visitTotals(v);form.dataset.lt=v.labourType;
   $('#vfTotals').innerHTML=`<div><span>Labour${v.labourType==='contract'?' (included in monthly contract)':''}${v.labourType==='hourly'&&t.mins?` (${fmtMins(t.mins)} at ${gbp(v.rate)} an hour)`:''}</span><span>${gbp(t.labour)}</span></div><div><span>Extras</span><span>${gbp(t.materials)}</span></div><div class="grand"><span>Total</span><span>${gbp(t.total)}</span></div>`;
 }
@@ -1103,6 +1156,7 @@ async function saveVisit(form){
   v.invoicedOn=v.invoiced?(prev&&prev.invoicedOn||todayStr()):null;
   v.createdAt=prev&&prev.createdAt||new Date().toISOString();
   const fromTimer=form.dataset.timer==='1';
+  await saveNewItems(form,v.materials);
   await persist(form,async()=>{await store.put('visits',id,v);if(fromTimer)await saveSettings({...clone(S.settings),timer:null});},'Visit saved');
 }
 async function persist(form,fn,msg){
@@ -1157,20 +1211,22 @@ document.addEventListener('click',async e=>{
     case 'log-visit':openVisitForm({customerId:id});break;
     case 'edit-visit':openVisitForm({id});break;
     case 'vfilter':S.visitFilter=a.dataset.f;render(true);break;
+    case 'add-item':{$('#apptRows').insertAdjacentHTML('beforeend',matRow());const r=$('#apptRows').lastElementChild;r.querySelector('input').focus();break;}
     case 'add-mat':{$('#matRows').insertAdjacentHTML('beforeend',matRow());const r=$('#matRows').lastElementChild;r.querySelector('input').focus();break;}
     case 'logo-remove':if(armed(a,'Tap again to remove')){const{logo,...rest}=clone(S.settings);try{await saveSettings({...rest,logo:null});toast('Logo removed');}catch(e){toast('That didn’t save. Try again.');}}break;
     case 'toggle-paused':S.showPaused=!S.showPaused;$('#custList').innerHTML=custListHtml($('#custSearch')?$('#custSearch').value:'');break;
     case 'add-extra':{syncExtras();(S.inv.extras=S.inv.extras||[]).push({name:'',qty:1,price:''});render(true);const r=$('#invExtras')?.lastElementChild;r&&r.querySelector('input').focus();break;}
-    case 'remove-mat':{const box=a.closest('#invExtras'),f=a.closest('#visitForm');a.closest('.mat-row').remove();if(f)updateVisitCalc(f);if(box){syncExtras();render(true);}break;}
+    case 'remove-mat':{const box=a.closest('#invExtras'),f=a.closest('#visitForm'),af=a.closest('#apptForm');a.closest('.mat-row').remove();if(f)updateVisitCalc(f);if(af)updateApptSum(af);if(box){syncExtras();render(true);}break;}
     case 'dur':{const f=$('#visitForm'),el=f.elements,m=Number(a.dataset.m);
       if(el.start.value)el.end.value=addMins(el.start.value,m);
       else{const d=new Date(),nowM=Math.floor((d.getHours()*60+d.getMinutes())/5)*5;el.end.value=`${pad(Math.floor(nowM/60))}:${pad(nowM%60)}`;el.start.value=addMins(el.end.value,-m);}
-      el.minutes.value=m;updateVisitCalc(f);break;}
+      setDur(f,'minutes',m);updateVisitCalc(f);break;}
     case 'start-timer':
       try{await saveSettings({...clone(S.settings),timer:{customerId:id,start:new Date().toISOString(),scheduledKey:a.dataset.key||''}});closeSheet();toast('Timer started');}catch(err){toast('The timer didn’t start. Try again.');}
       break;
     case 'stop-timer':{const t=S.settings.timer;if(!t)break;const d=new Date(t.start);
-      closeSheet();openVisitForm({customerId:t.customerId,date:localDate(d),start:localTime(d),end:localTime(new Date()),fromTimer:true,scheduledKey:t.scheduledKey||''});break;}
+      const so=t.scheduledKey?findOcc(t.scheduledKey):null;
+      closeSheet();openVisitForm({customerId:t.customerId,date:localDate(d),start:localTime(d),end:localTime(new Date()),fromTimer:true,scheduledKey:t.scheduledKey||'',materials:so&&so.items||[]});break;}
     case 'discard-timer':
       if(armed(a,'Discard?'))try{await saveSettings({...clone(S.settings),timer:null});}catch(err){toast('That didn’t save. Try again.');}
       break;
@@ -1210,7 +1266,7 @@ document.addEventListener('click',async e=>{
     case 'new-appt':openApptForm({date:a.dataset.d});break;
     case 'move-occ':openApptForm({key:a.dataset.key});break;
     case 'log-occ':{const o=findOcc(a.dataset.key);if(!o)break;closeSheet();
-      openVisitForm({customerId:o.customerId,date:o.date>todayStr()?todayStr():o.date,start:o.start,end:o.start?addMins(o.start,o.duration):'',scheduledKey:o.key});break;}
+      openVisitForm({customerId:o.customerId,date:o.date>todayStr()?todayStr():o.date,start:o.start,end:o.start?addMins(o.start,o.duration):'',scheduledKey:o.key,materials:o.items});break;}
     case 'skip-occ':{const o=findOcc(a.dataset.key);if(!o||!armed(a,o.kind==='extra'?'Tap again to cancel':'Tap again to skip'))break;
       try{if(o.kind==='extra')await store.remove('schedule',o.exId);
         else await store.put('schedule',`${o.customerId}_${o.origDate}`,{customerId:o.customerId,kind:'skipped',originalDate:o.origDate,date:o.origDate});
@@ -1252,7 +1308,9 @@ document.addEventListener('input',e=>{
   const f=e.target.closest('form');
   if(e.target.name==='mname')openPicker(e.target);
   if(e.target.closest&&e.target.closest('#invExtras'))syncExtras();
+  if(f&&e.target.dataset&&e.target.dataset.hm)readDur(f,e.target.dataset.for);
   if(f&&f.id==='visitForm')updateVisitCalc(f,e.target);
+  if(f&&f.id==='apptForm'){timeLink(f,e.target,'duration');updateApptSum(f);}
   if(f&&f.id==='custForm'&&e.target.name==='pricing')f.dataset.pr=e.target.value;
   if(e.target.id==='custSearch')$('#custList').innerHTML=custListHtml(e.target.value);
 });
@@ -1323,7 +1381,7 @@ async function startApp(session){
     settings:s=>{S.settings={...defaultSettings(),...(s?clone(s):{})};render();
       if(s&&!s.logo&&s.logo!==null&&s.businessName==='The Lakes Gardener'&&!window.__logoMove){window.__logoMove=1;const sc=document.createElement('script');sc.src='lakes-logo.js';
         sc.onload=()=>{if(window.LAKES_LOGO&&!S.settings.logo)saveSettings({...clone(S.settings),logo:window.LAKES_LOGO}).catch(()=>{});};document.head.appendChild(sc);}}},
-    e=>{if(e&&/not allowed|permission|JWT|row-level/i.test(e.message||''))toast('This email isn’t set up to use the app.');else toast('Lost the connection to your records. Reload the page to reconnect.');});
+    e=>{if(e&&/not allowed|permission|JWT|row-level/i.test(e.message||''))toast('This email isn’t set up to use the app.');});
 }
 (async()=>{
   const{data:{session}}=await SB.auth.getSession();
