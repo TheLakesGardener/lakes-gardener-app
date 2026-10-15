@@ -99,6 +99,7 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .charge{margin-top:12px}
 .p-items .mat-row{margin-top:6px}
 .part-row .pr-grid{margin-top:8px}
+.charge .vt{font-weight:700}
 .charge .sub-h{font-weight:700;font-size:.82rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding-top:10px}
 .pr-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .pr-grid .hm{grid-column:span 2;margin-top:0}
@@ -330,7 +331,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-9';let updateWaiting=null;
+const APP_VERSION='2026-10-15-10';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -535,9 +536,7 @@ function openOccurrence(key){
   ${addr?`<p>${esc(addr)}<br><a href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(addr)}" target="_blank" rel="noopener">Directions</a></p>`:''}
   ${phone?`<p><a href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a></p>`:''}
   ${(c.tasks||[]).length?`<p><span class="muted">Usual jobs:</span> ${esc(c.tasks.join(', '))}</p>`:''}
-  ${o.status==='completed'&&o.visitId?(()=>{const v=S.visits.find(x=>x.id===o.visitId);if(!v)return '';const t=visitTotals(v);
-      return `<div class="totals charge"><div><span>${v.labourType==='contract'?`Labour: ${fmtMins(t.mins)}, in contract`:v.labourType==='fixed'?'Fixed price':`Labour: ${fmtMins(t.mins)} × ${gbp(v.rate)}/hr`}</span><span>${gbp(t.labour)}</span></div>${t.materials?`<div><span>Extras</span><span>${gbp(t.materials)}</span></div>`:''}<div class="grand"><span>Charged for this visit</span><span>${gbp(t.total)}</span></div></div>`;})()
-    :o.status!=='skipped'?chargeHtml(chargeFor(o.customerId,o.duration,o.items||[]),'Expected charge'):''}
+  ${o.status!=='skipped'?jobChargeHtml(o):''}
   ${o.partOf?`<p><span class="muted">This visit is for:</span> ${esc(o.task||'Main job')}</p>`:''}
   ${partList.length?`<p><span class="muted">This job:</span> ${partList.map(x=>`<button class="linkbtn" data-action="open-occ" data-key="${esc(x.k)}">${esc(x.label)} ${shortDate(x.date)}</button>`).join(', ')}</p>`:''}
   ${o.notes?`<p><span class="muted">Visit note:</span> ${esc(o.notes)}</p>`:''}
@@ -558,7 +557,24 @@ function chargeFor(cid,mins,items,mainOnly){
   for(const m of items||[])rows.push([`${m.name}${(Number(m.qty)||0)!==1?` × ${fmtNum(m.qty)}`:''}${m.price?` @ ${gbp(m.price)}`:''}`,r2((Number(m.qty)||0)*(Number(m.price)||0))]);
   return{rows,total:r2(rows.reduce((t,r)=>t+r[1],0)),warn};
 }
-function chargeHtml(ch,title){return `${ch.warn?`<div class="warnbox">${esc(ch.warn)}</div>`:''}<div class="totals charge">${ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}<div class="grand"><span>${title||'Charge for this visit'}</span><span>${gbp(ch.total)}</span></div></div>`;}
+function occCharge(occ){
+  const v=occ.visitId?S.visits.find(x=>x.id===occ.visitId):null;
+  if(!v)return{...chargeFor(occ.customerId,occ.duration,occ.items||[]),done:false};
+  const t=visitTotals(v),rows=[[v.labourType==='contract'?`Labour: ${fmtMins(t.mins)}, in contract`:v.labourType==='fixed'?'Fixed price for the visit':`Labour: ${fmtMins(t.mins)} × ${gbp(v.rate)}/hr`,r2(t.labour)]];
+  for(const m of v.materials||[])rows.push([`${m.name}${(Number(m.qty)||0)!==1?` × ${fmtNum(m.qty)}`:''}${m.price?` @ ${gbp(m.price)}`:''}`,r2((Number(m.qty)||0)*(Number(m.price)||0))]);
+  return{rows,total:r2(rows.reduce((x,r)=>x+r[1],0)),warn:'',done:true};
+}
+function jobChargeHtml(o){
+  const root=o.partOf||o.key,members=[];
+  const ro=o.partOf?findOcc(root):o;if(ro)members.push({occ:ro,label:'Started'});
+  for(const e of jobParts(root)){const po=`x:${e.id}`===o.key?o:findOcc(`x:${e.id}`);if(po&&po.status!=='skipped')members.push({occ:po,label:`Part ${e.part||2}${e.task?`: ${e.task}`:''}`});}
+  if(members.length<2){const ch=occCharge(o);return chargeHtml(ch,ch.done?'Visit total (logged)':'Visit total');}
+  let total=0,warn='';
+  const body=members.map(m=>{const ch=occCharge(m.occ);total+=ch.total;if(ch.warn)warn=ch.warn;const me=m.occ.key===o.key;
+    return `<div class="sub-h"><span>${me?'This visit':esc(m.label)}, ${shortDate(m.occ.date)}${ch.done?' ✓':''}</span></div>${ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}<div class="vt"><span>Visit total</span><span>${gbp(ch.total)}</span></div>`;}).join('');
+  return `${warn?`<div class="warnbox">${esc(warn)}</div>`:''}<div class="totals charge">${body}<div class="grand"><span>Job total</span><span>${gbp(r2(total))}</span></div></div>`;
+}
+function chargeHtml(ch,title){return `${ch.warn?`<div class="warnbox">${esc(ch.warn)}</div>`:''}<div class="totals charge">${ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}<div class="grand"><span>${title||'Visit total'}</span><span>${gbp(ch.total)}</span></div></div>`;}
 function itemsTotal(items){return r2((items||[]).reduce((t,m)=>t+(Number(m.qty)||0)*(Number(m.price)||0),0));}
 function readItems(box){return [...box.querySelectorAll('.mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||0,price:parseFloat(r.querySelector('[name=mprice]').value)||0})).filter(m=>m.name);}
 function saveNewHtml(){return `<label class="save-new"><input type="checkbox" name="saveNew" checked> Add new items to services and products as <select name="saveAs" aria-label="Save as"><option value="services">services</option><option value="materials">products</option></select></label>`;}
