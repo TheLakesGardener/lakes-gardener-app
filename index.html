@@ -336,7 +336,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-15-12';let updateWaiting=null;
+const APP_VERSION='2026-10-19-1';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -598,7 +598,7 @@ async function saveNewItems(form,items){
 }
 function partRow(x){const d=x.duration||60,dis=x.done?' disabled':'';
   return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:x.fixed?'':`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
-  ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}</p>`:`
+  ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}${x.task?` · ${esc(x.task)}`:''} ${x.self?'':`<button type="button" class="linkbtn" data-action="open-occ" data-key="${esc(x.k)}">Open</button>`}</p>`:`
   <label class="f" style="margin-top:4px">What for?</label><div class="pick-wrap"><input name="ptask" autocomplete="off" placeholder="Main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${dis}></div>
   <label class="check p-save" hidden><input type="checkbox" name="psave" checked> <span>Add to services and products</span></label>
   <div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${dis}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${dis}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${dis}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${dis}><span>m</span></span></div>
@@ -607,9 +607,11 @@ function partRow(x){const d=x.duration||60,dis=x.done?' disabled':'';
   <p class="pr-charge"></p>`}</div>`;}
 function partsSectionHtml(o){
   const root=o.partOf||o.key,rows=[];
-  if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Started',date:r.date,start:r.start,fixed:true});}
+  if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Main visit',date:r.date,start:r.start,fixed:true,k:root});
+    rows.push({label:`Part ${o.part||2} (this one, above)`,date:o.date,start:o.start,fixed:true,task:o.task,k:o.key,self:true});}
   for(const e of jobParts(root)){if(`x:${e.id}`===o.key)continue;const done=S.visits.some(v=>v.scheduledKey===`x:${e.id}`);
     rows.push({id:e.id,label:`Part ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done,task:e.task||'',items:e.items||[]});}
+  rows.sort((a,b)=>(a.label==='Main visit'?-1:b.label==='Main visit'?1:0)||(a.date||'').localeCompare(b.date||'')||(a.start||'').localeCompare(b.start||''));
   return `<fieldset class="f"><legend>Visits on this job <span class="hint">if the job runs over more than one day; say what each one is for</span></legend><div id="partRows" data-root="${esc(root)}">${rows.map(partRow).join('')}</div>
   <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="part-add">+ Visit</button></div></fieldset>`;
 }
@@ -636,6 +638,8 @@ function updateApptSum(form){
   const main=chargeFor(cid,Number(form.elements.duration.value)||0,readItems($('#apptRows')||form),lv||null);
   const parts=[];
   const known=new Set(catalogue().map(x=>x.name.toLowerCase()));
+  const stw=form.querySelector('.self-task');if(stw){const t=stw.querySelector('[name=ptask]').value.trim(),ps=stw.querySelector('.p-save'),isNew=!!t&&!/^main job/i.test(t)&&!catalogue().some(x=>x.name.toLowerCase()===t.toLowerCase());
+    ps.hidden=!isNew;if(isNew)ps.querySelector('span').textContent=`Add “${t}” to services and products`;}
   form.querySelectorAll('.part-row').forEach(r=>{const out=r.querySelector('.pr-charge');if(!out)return;const pt=readPart(r),ch=chargeFor(cid,pt.dur,pt.items);
     const ps=r.querySelector('.p-save');if(ps){const isNew=!!pt.task&&!known.has(pt.task.toLowerCase())&&!r.querySelector('[name=ptask]').disabled;ps.hidden=!isNew;
       if(isNew)ps.querySelector('span').textContent=`Add “${pt.task}” to services and products`;}
@@ -663,10 +667,12 @@ function openApptForm(p){
   const lv=o&&o.visitId?S.visits.find(x=>x.id===o.visitId):null;
   if(lv){date=lv.date;start=lv.start||'';dur=Number(lv.minutes)||dur;items=lv.materials||[];notes=lv.notes||'';}
   const partNo=pf?jobParts(p.partOf).length+2:0;
-  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}" data-vid="${esc(lv?lv.id:'')}" data-part-of="${esc(p.partOf||'')}" data-part="${partNo}">${head(lv?'Edit visit':o?'Edit or reschedule visit':pf?'Add a visit to finish the job':'Schedule a visit')}
+  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}" data-vid="${esc(lv?lv.id:'')}" data-part-of="${esc(p.partOf||'')}" data-part="${partNo}">${head(lv?'Edit visit':o&&o.partOf?`Edit or reschedule Part ${o.part||2}`:o?'Edit or reschedule visit':pf?'Add a visit to finish the job':'Schedule a visit')}
   ${lv?`<p class="muted" style="margin-top:4px">Logged ✓${lv.invoiced?' and invoiced':''}. Changes here update the logged visit.</p>`:''}
   ${pf?`<p class="muted" style="margin-top:4px">Part ${partNo} of ${esc(c.name||'')}’s job from ${shortDate(pf.date)}. The regular schedule stays the same, and on the invoice the hours are added to that job.</p>`:''}
   <label class="f">Customer</label>${custPick('customerId',cid,'',!!o||!!pf)}
+  ${o&&o.partOf?`<div class="self-task"><label class="f">What for? <span class="hint">Part ${o.part||2} of the job from ${shortDate(jobDate(o.partOf))}</span></label><div class="pick-wrap"><input name="ptask" id="selfTask" autocomplete="off" placeholder="Main job" value="${esc(o.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"></div>
+  <label class="check p-save" hidden><input type="checkbox" name="psave" checked> <span>Add to services and products</span></label></div>`:''}
   <label class="f">Date<input type="date" name="date" required value="${esc(date)}"></label>
   ${quickDur('How long?')}
   <div class="row2"><label class="f">Start <span class="hint">optional</span><input type="time" name="start" value="${esc(start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(start?addMins(start,dur):'')}"></label></div>
@@ -692,7 +698,8 @@ async function saveAppt(form){
   if(o&&o.kind==='extra'){id=o.exId;body.kind='extra';}
   else if(o){id=`${cid}_${o.origDate}`;body.kind='moved';body.originalDate=o.origDate;}
   else{id=newId();body.kind='extra';if(partOf){body.partOf=partOf;body.part=Number(form.dataset.part)||2;}}
-  if(o&&o.partOf){body.partOf=o.partOf;body.part=o.part||2;body.task=o.task||'';}
+  if(o&&o.partOf){body.partOf=o.partOf;body.part=o.part||2;const st=form.querySelector('#selfTask');let t=st?st.value.trim():(o.task||'');if(/^main job/i.test(t))t='';body.task=t;
+    if(t&&st&&form.querySelector('.self-task [name=psave]').checked&&!catalogue().some(x=>x.name.toLowerCase()===t.toLowerCase())){const next=clone(S.settings);next.services=[...(next.services||[]),{name:t,price:0}];await saveSettings(next);}}
   S.cal.date=date;
   await saveNewItems(form,items);
   const done=form.dataset.done==='1';form.dataset.done='';
@@ -1227,7 +1234,7 @@ function closePicker(){if(!pickState)return;const p=pickState.input.closest('.pi
 function choosePick(i){
   if(!pickState)return;const x=pickState.items[i],input=pickState.input;if(!x)return;
   if(input.name==='ptask'){input.value=x.name;closePicker();input.blur();const pr=input.closest('.part-row');
-    if(x.price&&!x.isNew){pr.querySelector('.p-items').insertAdjacentHTML('beforeend',matRow({name:x.name,qty:1,price:x.price}));}
+    if(x.price&&!x.isNew){(pr?pr.querySelector('.p-items'):$('#apptRows')).insertAdjacentHTML('beforeend',matRow({name:x.name,qty:1,price:x.price}));}
     updateApptSum(input.closest('form'));return;}
   const row=input.closest('.mat-row');input.value=x.name;
   const p=row.querySelector('[name=mprice]');if(x.price)p.value=x.price;else if(!p.value)p.value='';
