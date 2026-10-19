@@ -91,6 +91,12 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .check{display:flex;gap:10px;align-items:center;margin-top:14px;font-size:.95rem}
 .mat-row{display:grid;grid-template-columns:1fr 62px 86px 44px;gap:6px;align-items:end}
 .hm-field{margin-top:14px}
+.bar-btns{display:flex;gap:8px}
+.imp-map{margin-top:10px}.imp-map summary{cursor:pointer;font-weight:600;color:var(--moss)}
+.imp-actions{display:flex;gap:8px;margin-top:10px}
+.imp-list{margin-top:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);max-height:50vh;overflow-y:auto}
+.imp-row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-bottom:1px solid var(--line);font-weight:400}
+.imp-row:last-child{border-bottom:0}.imp-row input{margin-top:4px}.imp-row.dup{opacity:.7}
 .part-row{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 10px;margin-top:8px}
 .pr-top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px}
 .p-save{margin-top:8px;font-weight:400}
@@ -336,7 +342,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-19-1';let updateWaiting=null;
+const APP_VERSION='2026-10-19-2';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -729,10 +735,81 @@ function viewVisits(){
   return h;
 }
 
+/* ---------- customer import (Jobber or any spreadsheet saved as CSV) ---------- */
+function parseCSV(text){
+  text=text.replace(/^﻿/,'');
+  const first=text.split(/\r?\n/)[0]||'';const delim=(first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length?';':(first.includes('\t')&&!first.includes(',')?'\t':',');
+  const rows=[];let row=[],f='',q=false;
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){if(ch==='"'){if(text[i+1]==='"'){f+='"';i++;}else q=false;}else f+=ch;continue;}
+    if(ch==='"')q=true;else if(ch===delim){row.push(f);f='';}
+    else if(ch==='\n'||ch==='\r'){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(f);f='';if(row.some(x=>x.trim()))rows.push(row);row=[];}
+    else f+=ch;}
+  row.push(f);if(row.some(x=>x.trim()))rows.push(row);
+  return rows;
+}
+const IMP_FIELDS=[['name','Name'],['first','First name'],['last','Last name'],['company','Company'],['email','Email'],['phone','Phone'],['street1','Address line 1'],['street2','Address line 2'],['city','Town or city'],['county','County'],['postcode','Postcode'],['notes','Notes']];
+function guessMap(h){
+  const H=h.map(x=>x.trim().toLowerCase()),m={};
+  const find=(tests,prefer)=>{let best=-1;for(const p of prefer||['']){H.forEach((x,i)=>{if(best<0&&x.includes(p)&&tests.some(t=>t instanceof RegExp?t.test(x):x===t))best=i;});if(best>=0)break;}return best;};
+  const addr=['service','property','billing',''];
+  m.name=find(['display name','client name','name','full name','customer','customer name','client']);
+  m.first=find(['first name','firstname','first']);m.last=find(['last name','lastname','surname','last']);
+  m.company=find(['company name','company','business name']);
+  m.email=find([/e-?mail/]);m.phone=find([/phone|mobile|tel/]);
+  m.street1=find([/street( |)1|address( line|) ?1|^street$|^address$|street address|address$/],addr);
+  m.street2=find([/street( |)2|address( line|) ?2/],addr);
+  m.city=find([/city|town/],addr);m.county=find([/county|state|province|region/],addr);
+  m.postcode=find([/post ?code|zip/],addr);m.notes=find([/notes?$/]);
+  const bill=['billing'];m.alt={street1:find([/street( |)1|address( line|) ?1/],bill),street2:find([/street( |)2|address( line|) ?2/],bill),city:find([/city|town/],bill),county:find([/county|state|province|region/],bill),postcode:find([/post ?code|zip/],bill)};
+  return m;
+}
+const normName=n=>(n||'').toLowerCase().replace(/^(mr|mrs|ms|miss|dr)\.?\s+/,'').replace(/[^a-z0-9]/g,'');
+function impRows(){
+  const I=S.imp,m=I.map,g=(r,k)=>m[k]>=0?(r[m[k]]||'').trim():'';
+  const existing=Object.values(S.customers);
+  return I.rows.map((r,idx)=>{
+    let name=g(r,'name')||[g(r,'first'),g(r,'last')].filter(Boolean).join(' ')||g(r,'company');
+    let addr=[g(r,'street1'),g(r,'street2'),g(r,'city'),g(r,'county'),g(r,'postcode')].filter(Boolean).join('\n');
+    if(!addr&&m.alt){const A=m.alt,ga=k=>A[k]>=0?(r[A[k]]||'').trim():'';addr=['street1','street2','city','county','postcode'].map(ga).filter(Boolean).join('\n');}
+    const email=g(r,'email').split(/[;,\s]+/).filter(x=>x.includes('@'))[0]||'',phone=g(r,'phone');
+    const dup=existing.find(c=>(email&&(c.email||'').toLowerCase().split(/[;,\s]+/).includes(email.toLowerCase()))||(name&&normName(c.name)===normName(name)));
+    return{idx,name,address:addr,email,phone,notes:g(r,'notes'),dup:dup?dup.name:''};}).filter(x=>x.name);
+}
+function openImportSheet(){
+  S.imp=null;
+  openSheet(`${head('Import customers')}<div class="detail">
+  <p>Bring in customers from <strong>Jobber</strong> or any spreadsheet.</p>
+  <ol class="muted" style="padding-left:18px;margin:8px 0 0"><li>In Jobber: <strong>Clients → Export</strong>; Jobber emails you a CSV file.</li><li>From Excel or Google Sheets: <strong>File → Download/Save as → CSV</strong>.</li></ol>
+  <label class="f">Choose the CSV file<input type="file" accept=".csv,.txt,text/csv" data-change="imp-file"></label>
+  <div id="impBody"></div></div>`);
+}
+function renderImport(){
+  const I=S.imp,box=$('#impBody');if(!box||!I)return;
+  const list=impRows();I.list=list;
+  const opts=k=>`<option value="-1">(none)</option>${I.head.map((h,i)=>`<option value="${i}"${I.map[k]===i?' selected':''}>${esc(h||`Column ${i+1}`)}</option>`).join('')}`;
+  const nNew=list.filter(x=>I.pick.has(x.idx)).length;
+  box.innerHTML=`<p style="margin-top:14px"><strong>${list.length}</strong> customer${list.length===1?'':'s'} found${list.filter(x=>x.dup).length?`, <strong>${list.filter(x=>x.dup).length}</strong> already in the app (left unticked)`:''}.</p>
+  <details class="imp-map"><summary>Check which column is which</summary><div class="row2">${IMP_FIELDS.map(([k,l])=>`<label class="f">${l}<select data-change="imp-map" data-k="${k}">${opts(k)}</select></label>`).join('')}</div></details>
+  <div class="imp-actions"><button type="button" class="btn small" data-action="imp-all">Tick all new</button><button type="button" class="btn small" data-action="imp-none">Untick all</button></div>
+  <div class="imp-list">${list.map(x=>`<label class="imp-row${x.dup?' dup':''}"><input type="checkbox" data-change="imp-pick" data-i="${x.idx}"${I.pick.has(x.idx)?' checked':''}><span><strong>${esc(x.name)}</strong>${x.dup?` <span class="flag">Already in app</span>`:''}<br><span class="muted">${esc([x.address.split('\n')[0],x.address.split('\n').slice(-1)[0]].filter((v,i,a)=>v&&a.indexOf(v)===i).join(', '))}${x.email?` · ${esc(x.email)}`:''}${x.phone?` · ${esc(x.phone)}`:''}</span></span></label>`).join('')}</div>
+  <p class="muted" style="margin-top:10px">They come in as <strong>Paused</strong>, so your calendar doesn’t fill up. Open each one to set how often you visit and their rate, then set them to Active.</p>
+  <div class="actions"><button type="button" class="btn primary" data-action="imp-go"${nNew?'':' disabled'}>Import ${nNew} customer${nNew===1?'':'s'}</button></div>`;
+}
+async function runImport(btn){
+  const I=S.imp;if(!I)return;const list=I.list.filter(x=>I.pick.has(x.idx));if(!list.length)return;
+  btn.disabled=true;let n=0;
+  try{for(const x of list){
+      await store.put('customers',newId(),{name:x.name,address:x.address,phone:x.phone,email:x.email,notes:x.notes,frequency:'one-off',status:'paused',pricing:'hourly',rate:'',price:'',tasks:[],nextDue:'',importedAt:new Date().toISOString()});
+      n++;if(n%5===0)btn.textContent=`Importing… ${n} of ${list.length}`;}
+    closeSheet();S.showPaused=true;toast(`${n} customer${n===1?'':'s'} imported as Paused`);render(true);}
+  catch(e){btn.disabled=false;btn.textContent='Try again';toast(`Stopped after ${n}. Check your signal and tap Try again; ones already imported are ticked off.`);
+    list.slice(0,n).forEach(x=>I.pick.delete(x.idx));}
+}
 function viewCustomers(){
   if(!S.ready)return `<p class="muted">Loading…</p>`;
   const n=Object.keys(S.customers).length;
-  return `<div class="bar"><h2 class="page-title">Customers</h2><button class="btn small primary" data-action="new-customer">Add customer</button></div>
+  return `<div class="bar"><h2 class="page-title">Customers</h2><div class="bar-btns"><button class="btn small" data-action="import-open">Import</button><button class="btn small primary" data-action="new-customer">Add customer</button></div></div>
   ${n>5?`<input id="custSearch" type="search" placeholder="Search all customers, including paused" aria-label="Search customers">`:''}
   <div id="custList">${custListHtml('')}</div>`;
 }
@@ -1385,6 +1462,10 @@ document.addEventListener('click',async e=>{
   switch(a.dataset.action){
     case 'close-sheet':closeSheet();break;
     case 'new-customer':openCustomerForm();break;
+    case 'import-open':openImportSheet();break;
+    case 'imp-all':S.imp.pick=new Set(S.imp.list.filter(x=>!x.dup).map(x=>x.idx));renderImport();break;
+    case 'imp-none':S.imp.pick=new Set();renderImport();break;
+    case 'imp-go':runImport(a);break;
     case 'edit-customer':openCustomerForm(id);break;
     case 'log-visit':openVisitForm({customerId:id});break;
     case 'edit-visit':openVisitForm({id});break;
@@ -1490,6 +1571,12 @@ document.addEventListener('change',e=>{
   if(t.closest&&t.closest('#apptForm'))updateApptSum(t.closest('#apptForm'));
   if(t.name==='mname'){const m=catalogue().find(x=>x.name.toLowerCase()===t.value.trim().toLowerCase());const p=t.closest('.mat-row').querySelector('[name=mprice]');if(m&&!p.value&&m.price)p.value=m.price;afterRowChange(t);}
   if(!k)return;
+  if(k==='imp-file'){const f=t.files&&t.files[0];if(!f)return;if(f.size>5e6)return toast('That file is too big. Export just your clients.');
+    f.text().then(txt=>{const rows=parseCSV(txt);if(rows.length<2)return toast('That file has no rows. Is it a CSV export?');
+      const head=rows[0].map(x=>x.trim());S.imp={head,rows:rows.slice(1),map:guessMap(head),pick:new Set()};
+      S.imp.pick=new Set(impRows().filter(x=>!x.dup).map(x=>x.idx));renderImport();}).catch(()=>toast('That file couldn’t be read.'));return;}
+  if(k==='imp-map'){S.imp.map[t.dataset.k]=Number(t.value);S.imp.pick=new Set(impRows().filter(x=>!x.dup).map(x=>x.idx));renderImport();return;}
+  if(k==='imp-pick'){const i=Number(t.dataset.i);t.checked?S.imp.pick.add(i):S.imp.pick.delete(i);const b=$('[data-action=imp-go]'),n=S.imp.pick.size;if(b){b.disabled=!n;b.textContent=`Import ${n} customer${n===1?'':'s'}`;}return;}
   if(k==='logo-file'){const f=t.files&&t.files[0];if(f)setLogo(f);return;}
   if(k==='vf-customer'){const f=$('#visitForm');if(f.dataset.id)return;const c=S.customers[t.value];if(!c)return;
     f.querySelectorAll('[name=task]').forEach(x=>x.checked=(c.tasks||[]).includes(x.value));
