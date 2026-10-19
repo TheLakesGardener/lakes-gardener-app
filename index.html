@@ -342,7 +342,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-19-2';let updateWaiting=null;
+const APP_VERSION='2026-10-19-3';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -500,7 +500,7 @@ function shiftCal(n){const d=calDate(),v=S.cal.view;if(v==='day')return addDays(
 function apptCard(o,showDate){
   const c=S.customers[o.customerId]||{};
   const time=o.start?`${o.start}–${addMins(o.start,o.duration)}`:'Any time';
-  const flag={completed:'Done',missed:'Not logged',skipped:'Skipped'}[o.status]||(o.partOf?`Part ${o.part||2}${o.task?`: ${esc(o.task)}`:''}`:o.kind==='extra'?'Extra visit':o.moved?'Moved':(o.items||[]).length?'Extras':'');
+  const flag={completed:'Done',missed:'Not logged',skipped:'Skipped'}[o.status]||(o.partOf?`Visit ${o.part||2}${o.task?`: ${esc(o.task)}`:''}`:o.kind==='extra'?'Extra visit':o.moved?'Moved':(o.items||[]).length?'Extras':'');
   return `<button class="appt ${o.status}${o.kind==='extra'?' extra':''}" data-action="open-occ" data-key="${esc(o.key)}"><span class="t">${showDate?niceDate(o.date,{weekday:'short',day:'numeric',month:'short'})+', ':''}${time}${flag?` <span class="flag">${flag}</span>`:''}</span><strong>${esc(c.name||'Removed customer')}</strong>${c.address?`<span class="sub">${esc(c.address.split('\n')[0])}</span>`:''}</button>`;
 }
 function viewSchedule(){
@@ -540,11 +540,11 @@ function openOccurrence(key){
   else if(o.status==='skipped')act=`<button class="btn" data-action="restore-occ" data-key="${esc(key)}">Put back on schedule</button>`;
   else act=`<button class="btn primary" data-action="quick-done" data-key="${esc(key)}">✓ Mark as done</button><button class="btn" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
   const parts=jobParts(o.partOf||key).filter(e=>`x:${e.id}`!==key);
-  const root=o.partOf&&o.partOf!==key?[{label:'Started',date:jobDate(o.partOf),k:o.partOf}]:[];
-  const partList=[...root,...parts.map(e=>({label:`Part ${e.part||2}`,date:e.date,k:`x:${e.id}`}))];
+  const root=o.partOf&&o.partOf!==key?[{label:'Visit 1 (main job)',date:jobDate(o.partOf),k:o.partOf}]:[];
+  const partList=[...root,...parts.map(e=>({label:`Visit ${e.part||2}`,date:e.date,k:`x:${e.id}`}))];
   openSheet(`${head(esc(c.name||'Visit'))}<div class="detail">
   <p><strong>${niceDate(o.date,{weekday:'long',day:'numeric',month:'long'})}</strong>, ${time}</p>
-  <p class="muted">${st}${o.partOf?`, part ${o.part||2} of the job from ${shortDate(jobDate(o.partOf))}`:o.kind==='extra'?', extra visit':o.moved?`, moved from ${niceDate(o.origDate,{weekday:'short',day:'numeric',month:'short'})}`:''}</p>
+  <p class="muted">${st}${o.partOf?`, visit ${o.part||2} of the job from ${shortDate(jobDate(o.partOf))}`:o.kind==='extra'?', extra visit':o.moved?`, moved from ${niceDate(o.origDate,{weekday:'short',day:'numeric',month:'short'})}`:''}</p>
   ${addr?`<p>${esc(addr)}<br><a href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(addr)}" target="_blank" rel="noopener">Directions</a></p>`:''}
   ${phone?`<p><a href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a></p>`:''}
   ${(c.tasks||[]).length?`<p><span class="muted">Usual jobs:</span> ${esc(c.tasks.join(', '))}</p>`:''}
@@ -582,8 +582,8 @@ function occCharge(occ){
 }
 function jobChargeHtml(o){
   const root=o.partOf||o.key,members=[];
-  const ro=o.partOf?findOcc(root):o;if(ro)members.push({occ:ro,label:'Started'});
-  for(const e of jobParts(root)){const po=`x:${e.id}`===o.key?o:findOcc(`x:${e.id}`);if(po&&po.status!=='skipped')members.push({occ:po,label:`Part ${e.part||2}${e.task?`: ${e.task}`:''}`});}
+  const ro=o.partOf?findOcc(root):o;if(ro)members.push({occ:ro,label:'Visit 1 (main job)'});
+  for(const e of jobParts(root)){const po=`x:${e.id}`===o.key?o:findOcc(`x:${e.id}`);if(po&&po.status!=='skipped')members.push({occ:po,label:`Visit ${e.part||2}${e.task?`: ${e.task}`:''}`});}
   if(members.length<2){const ch=occCharge(o);return chargeHtml(ch,ch.done?'Visit total (logged)':'Visit total');}
   let total=0,warn='';
   const body=members.map(m=>{const ch=occCharge(m.occ);total+=ch.total;if(ch.warn)warn=ch.warn;const me=m.occ.key===o.key;
@@ -605,7 +605,7 @@ async function saveNewItems(form,items){
 function partRow(x){const d=x.duration||60,dis=x.done?' disabled':'';
   return `<div class="part-row" data-id="${esc(x.id||'')}"><div class="pr-top"><strong>${esc(x.label)}</strong>${x.done?`<span class="flag">Done</span>`:x.fixed?'':`<button type="button" class="icon" data-action="part-remove" aria-label="Remove this visit">×</button>`}</div>
   ${x.fixed?`<p class="muted" style="margin:2px 0 0">${shortDate(x.date)}${x.start?`, ${esc(x.start)}`:''}${x.task?` · ${esc(x.task)}`:''} ${x.self?'':`<button type="button" class="linkbtn" data-action="open-occ" data-key="${esc(x.k)}">Open</button>`}</p>`:`
-  <label class="f" style="margin-top:4px">What for?</label><div class="pick-wrap"><input name="ptask" autocomplete="off" placeholder="Main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${dis}></div>
+  <label class="f" style="margin-top:4px">What for?</label><div class="pick-wrap"><input name="ptask" autocomplete="off" placeholder="Carrying on the main job" value="${esc(x.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"${dis}></div>
   <label class="check p-save" hidden><input type="checkbox" name="psave" checked> <span>Add to services and products</span></label>
   <div class="pr-grid"><input type="date" name="pdate" value="${esc(x.date)}" aria-label="Date"${dis}><input type="time" name="pstart" value="${esc(x.start||'')}" aria-label="Start"${dis}><span class="hm"><input type="number" name="ph" min="0" max="23" inputmode="numeric" value="${Math.floor(d/60)}" aria-label="Hours"${dis}><span>h</span><input type="number" name="pm" min="0" max="59" step="5" inputmode="numeric" value="${d%60}" aria-label="Minutes"${dis}><span>m</span></span></div>
   <div class="p-items">${(x.items||[]).map(matRow).join('')}</div>
@@ -613,11 +613,12 @@ function partRow(x){const d=x.duration||60,dis=x.done?' disabled':'';
   <p class="pr-charge"></p>`}</div>`;}
 function partsSectionHtml(o){
   const root=o.partOf||o.key,rows=[];
-  if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Main visit',date:r.date,start:r.start,fixed:true,k:root});
-    rows.push({label:`Part ${o.part||2} (this one, above)`,date:o.date,start:o.start,fixed:true,task:o.task,k:o.key,self:true});}
+  if(o.partOf){const r=findOcc(root);if(r)rows.push({label:'Visit 1 (main job)',date:r.date,start:r.start,fixed:true,k:root});
+    rows.push({label:`Visit ${o.part||2} (this one)`,date:o.date,start:o.start,fixed:true,task:o.task,k:o.key,self:true});}
   for(const e of jobParts(root)){if(`x:${e.id}`===o.key)continue;const done=S.visits.some(v=>v.scheduledKey===`x:${e.id}`);
-    rows.push({id:e.id,label:`Part ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done,task:e.task||'',items:e.items||[]});}
-  rows.sort((a,b)=>(a.label==='Main visit'?-1:b.label==='Main visit'?1:0)||(a.date||'').localeCompare(b.date||'')||(a.start||'').localeCompare(b.start||''));
+    rows.push({id:e.id,label:`Visit ${e.part||2}`,date:e.date,start:e.start,duration:e.duration,done,task:e.task||'',items:e.items||[]});}
+  if(!o.partOf&&jobParts(root).length)rows.push({label:'Visit 1 (main job, this one)',date:o.date,start:o.start,fixed:true,self:true});
+  rows.sort((a,b)=>(a.label.startsWith('Visit 1')?-1:b.label.startsWith('Visit 1')?1:0)||(a.date||'').localeCompare(b.date||'')||(a.start||'').localeCompare(b.start||''));
   return `<fieldset class="f"><legend>Visits on this job <span class="hint">if the job runs over more than one day; say what each one is for</span></legend><div id="partRows" data-root="${esc(root)}">${rows.map(partRow).join('')}</div>
   <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="part-add">+ Visit</button></div></fieldset>`;
 }
@@ -673,11 +674,11 @@ function openApptForm(p){
   const lv=o&&o.visitId?S.visits.find(x=>x.id===o.visitId):null;
   if(lv){date=lv.date;start=lv.start||'';dur=Number(lv.minutes)||dur;items=lv.materials||[];notes=lv.notes||'';}
   const partNo=pf?jobParts(p.partOf).length+2:0;
-  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}" data-vid="${esc(lv?lv.id:'')}" data-part-of="${esc(p.partOf||'')}" data-part="${partNo}">${head(lv?'Edit visit':o&&o.partOf?`Edit or reschedule Part ${o.part||2}`:o?'Edit or reschedule visit':pf?'Add a visit to finish the job':'Schedule a visit')}
+  openSheet(`<form id="apptForm" data-key="${esc(p.key||'')}" data-vid="${esc(lv?lv.id:'')}" data-part-of="${esc(p.partOf||'')}" data-part="${partNo}">${head(lv?'Edit visit':o&&o.partOf?`Edit or reschedule Visit ${o.part||2}`:o?'Edit or reschedule visit':pf?'Add a visit to finish the job':'Schedule a visit')}
   ${lv?`<p class="muted" style="margin-top:4px">Logged ✓${lv.invoiced?' and invoiced':''}. Changes here update the logged visit.</p>`:''}
-  ${pf?`<p class="muted" style="margin-top:4px">Part ${partNo} of ${esc(c.name||'')}’s job from ${shortDate(pf.date)}. The regular schedule stays the same, and on the invoice the hours are added to that job.</p>`:''}
+  ${pf?`<p class="muted" style="margin-top:4px">Visit ${partNo} of ${esc(c.name||'')}’s job from ${shortDate(pf.date)}. The regular schedule stays the same, and on the invoice the hours are added to that job.</p>`:''}
   <label class="f">Customer</label>${custPick('customerId',cid,'',!!o||!!pf)}
-  ${o&&o.partOf?`<div class="self-task"><label class="f">What for? <span class="hint">Part ${o.part||2} of the job from ${shortDate(jobDate(o.partOf))}</span></label><div class="pick-wrap"><input name="ptask" id="selfTask" autocomplete="off" placeholder="Main job" value="${esc(o.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"></div>
+  ${o&&o.partOf?`<div class="self-task"><label class="f">What for? <span class="hint">Visit ${o.part||2} of the job from ${shortDate(jobDate(o.partOf))}</span></label><div class="pick-wrap"><input name="ptask" id="selfTask" autocomplete="off" placeholder="Carrying on the main job" value="${esc(o.task||'')}" aria-label="What is this visit for" role="combobox" aria-expanded="false"></div>
   <label class="check p-save" hidden><input type="checkbox" name="psave" checked> <span>Add to services and products</span></label></div>`:''}
   <label class="f">Date<input type="date" name="date" required value="${esc(date)}"></label>
   ${quickDur('How long?')}
@@ -716,7 +717,7 @@ async function saveAppt(form){
     return persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);await store.put('visits',vid,upd);},'Visit updated');}
   if(done){const vid=newId();const visit=makeVisit(o,{date,start:body.start,duration:body.duration,items,notes:body.notes});
     return persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);await store.put('visits',vid,visit);},`Visit logged: ${fmtMins(body.duration)}`);}
-  await persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);},o?(o.date!==date||o.start!==body.start?'Visit updated and moved':'Visit updated'):partOf?`Part ${body.part} added for ${shortDate(date)}`:'Visit added to the schedule');
+  await persist(form,async()=>{await store.put('schedule',id,body);await saveParts(form,cid);},o?(o.date!==date||o.start!==body.start?'Visit updated and moved':'Visit updated'):partOf?`Visit ${body.part} added for ${shortDate(date)}`:'Visit added to the schedule');
 }
 
 function viewVisits(){
@@ -1542,7 +1543,7 @@ document.addEventListener('click',async e=>{
       const last=[...box.querySelectorAll('[name=pdate]')].map(x=>x.value).filter(Boolean).sort().pop()||f.elements.date.value||todayStr();
       let d=addDays(last,1);if(d<=todayStr())d=addDays(todayStr(),1);
       const left=Math.max(30,(readDur(f,'duration')||60)-(f.elements.start.value&&f.elements.end.value?0:0));
-      box.insertAdjacentHTML('beforeend',partRow({label:`Part ${n}`,date:d,start:'',duration:Math.min(left,120)}));updateApptSum(f);break;}
+      box.insertAdjacentHTML('beforeend',partRow({label:`Visit ${n}`,date:d,start:'',duration:Math.min(left,120)}));updateApptSum(f);break;}
     case 'part-add-item':{const pi=a.closest('.part-row').querySelector('.p-items');pi.insertAdjacentHTML('beforeend',matRow());pi.lastElementChild.querySelector('input').focus();break;}
     case 'part-remove':{const r=a.closest('.part-row'),f=r.closest('form');if(r.dataset.id)f.dataset.removed=((f.dataset.removed||'')+','+r.dataset.id);r.remove();updateApptSum(f);break;}
     case 'add-part':{const o=findOcc(a.dataset.key);if(!o)break;openApptForm({partOf:o.partOf||o.key});break;}
