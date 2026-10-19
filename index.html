@@ -91,6 +91,10 @@ input[type=checkbox],input[type=radio]{width:auto;min-height:0}
 .check{display:flex;gap:10px;align-items:center;margin-top:14px;font-size:.95rem}
 .mat-row{display:grid;grid-template-columns:1fr 62px 86px 44px;gap:6px;align-items:end}
 .hm-field{margin-top:14px}
+body.crew .tabs [data-tab=visits],body.crew .tabs [data-tab=invoice],body.crew .tabs [data-tab=customers],body.crew .tabs [data-tab=settings],body.crew [data-action=new-appt]{display:none}
+body.crew [name=mprice]{display:none}body.crew .picker button span:last-child{display:none}body.crew .mat-row{grid-template-columns:1fr 70px 44px}
+.crew-bar{margin:0 0 6px}
+.team-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
 .bar-btns{display:flex;gap:8px}
 .imp-map{margin-top:10px}.imp-map summary{cursor:pointer;font-weight:600;color:var(--moss)}
 .imp-actions{display:flex;gap:8px;margin-top:10px}
@@ -342,7 +346,7 @@ function defaultSettings(){return{businessName:'',hourlyRate:0,address:'',phone:
 const S={customers:{},visits:[],settings:defaultSettings(),ready:false,tab:'schedule',visitFilter:'all',schedule:[],invoices:[],invView:'new',cal:{view:'week',date:null},
   inv:{customerId:null,from:null,to:null,excluded:new Set(),showInvoiced:false,text:'',extras:[],month:null},downloads:null};
 let store=null,pending=false;
-const APP_VERSION='2026-10-19-3';let updateWaiting=null;
+const APP_VERSION='2026-10-19-4';let updateWaiting=null;
 function applyUpdate(v){
   if(!$('#sheet').hidden){updateWaiting=v;return;}
   let tried=false;try{const k='gr-reload-'+v;tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1');}catch(e){}
@@ -442,6 +446,7 @@ function render(force){
   pending=false;
   $('#view').classList.toggle('wide',S.tab==='schedule');$('.top').classList.toggle('wide',S.tab==='schedule');
   $('#view').innerHTML=VIEWS[S.tab]();
+  if(S.tab==='settings'&&!S.crew)loadTeam();
 }
 document.addEventListener('focusout',()=>setTimeout(()=>{if(pending&&$('#sheet').hidden)render();},0));
 
@@ -513,7 +518,7 @@ function viewSchedule(){
   else{const m1=d.slice(0,8)+'01';a=weekStart(m1);b=addDays(weekStart(addDays(addMonths(m1,1),-1)),6);title=niceDate(m1,{month:'long',year:'numeric'});}
   const occ=occurrencesInRange(a,b),live=occ.filter(o=>o.status!=='skipped');
   const missed=occurrencesInRange(addDays(today,-30),addDays(today,-1)).filter(o=>o.status==='missed');
-  let h=`<div class="cal-nav"><h2 class="cal-title">${title}</h2><div class="seg-btns">${['day','week','month'].map(x=>`<button data-action="cal-view" data-v="${x}" aria-pressed="${v===x}">${x[0].toUpperCase()+x.slice(1)}</button>`).join('')}</div></div>
+  let h=`${S.crew?`<p class="muted crew-bar">Signed in as ${esc(S.crew.name||S.userEmail)} · <button class="linkbtn" data-action="sign-out">Sign out</button></p>`:''}<div class="cal-nav"><h2 class="cal-title">${title}</h2><div class="seg-btns">${['day','week','month'].map(x=>`<button data-action="cal-view" data-v="${x}" aria-pressed="${v===x}">${x[0].toUpperCase()+x.slice(1)}</button>`).join('')}</div></div>
   <div class="cal-nav"><button class="icon" data-action="cal-move" data-n="-1" aria-label="Previous ${v}">‹</button><button class="btn small" data-action="cal-today">Today</button><button class="icon" data-action="cal-move" data-n="1" aria-label="Next ${v}">›</button><span class="cal-sum muted">${v!=='month'?`${live.length} visit${live.length===1?'':'s'}, ${fmtMins(live.reduce((s,o)=>s+o.duration,0))} booked`:''}</span><button class="btn small primary" data-action="new-appt" data-d="${v==='day'?d:(today>=a&&today<=b?today:a)}">Schedule a visit</button></div>`;
   if(missed.length)h+=`<div class="alert"><h3>${missed.length} past visit${missed.length===1?'':'s'} not logged</h3><p class="muted">Tap one to log it, move it or skip it.</p>${missed.slice(0,6).map(o=>apptCard(o,true)).join('')}${missed.length>6?`<p class="muted">And ${missed.length-6} more.</p>`:''}</div>`;
   if(v==='day'&&S.cal.back)h=`<button class="btn small back-btn" data-action="cal-back"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Back to ${esc(S.cal.back.label)}</button>`+h;
@@ -536,12 +541,15 @@ function openOccurrence(key){
   const st={completed:'Done ✓',missed:'Not logged yet',skipped:'Skipped',scheduled:'Scheduled'}[o.status];
   const addr=c.address?c.address.replace(/\s*\n\s*/g,', '):'',phone=(c.phone||'').split(',')[0].trim();
   let act;
-  if(o.status==='completed')act=`<button class="btn done-on" data-action="undo-done" data-id="${esc(o.visitId)}" title="Tap twice to undo">✓ Done</button><button class="btn primary" data-action="move-occ" data-key="${esc(key)}">Edit job</button>`;
+  if(S.crew){const mine=lv&&(lv.loggedBy||'').toLowerCase()===(S.userEmail||'').toLowerCase()&&!lv.invoiced;
+    act=o.status==='completed'?`<button class="btn done-on" disabled>✓ Done</button>${mine?`<button class="btn primary" data-action="crew-time" data-key="${esc(key)}" data-vid="${esc(lv.id)}">Change time</button>`:''}`
+      :o.status==='skipped'?'':`<button class="btn primary" data-action="quick-done" data-key="${esc(key)}">✓ Mark as done</button><button class="btn" data-action="crew-time" data-key="${esc(key)}">Log a different time</button>`;}
+  else if(o.status==='completed')act=`<button class="btn done-on" data-action="undo-done" data-id="${esc(o.visitId)}" title="Tap twice to undo">✓ Done</button><button class="btn primary" data-action="move-occ" data-key="${esc(key)}">Edit job</button>`;
   else if(o.status==='skipped')act=`<button class="btn" data-action="restore-occ" data-key="${esc(key)}">Put back on schedule</button>`;
   else act=`<button class="btn primary" data-action="quick-done" data-key="${esc(key)}">✓ Mark as done</button><button class="btn" data-action="move-occ" data-key="${esc(key)}">Edit or reschedule visit</button>${o.date===todayStr()&&!S.settings.timer?`<button class="btn" data-action="start-timer" data-id="${esc(o.customerId)}" data-key="${esc(key)}">Start timer</button>`:''}<button class="btn warn" data-action="skip-occ" data-key="${esc(key)}">${o.kind==='extra'?'Cancel visit':'Skip this visit'}</button>`;
   const parts=jobParts(o.partOf||key).filter(e=>`x:${e.id}`!==key);
   const root=o.partOf&&o.partOf!==key?[{label:'Visit 1 (main job)',date:jobDate(o.partOf),k:o.partOf}]:[];
-  const partList=[...root,...parts.map(e=>({label:`Visit ${e.part||2}`,date:e.date,k:`x:${e.id}`}))];
+  const partList=S.crew?[]:[...root,...parts.map(e=>({label:`Visit ${e.part||2}`,date:e.date,k:`x:${e.id}`}))];
   openSheet(`${head(esc(c.name||'Visit'))}<div class="detail">
   <p><strong>${niceDate(o.date,{weekday:'long',day:'numeric',month:'long'})}</strong>, ${time}</p>
   <p class="muted">${st}${o.partOf?`, visit ${o.part||2} of the job from ${shortDate(jobDate(o.partOf))}`:o.kind==='extra'?', extra visit':o.moved?`, moved from ${niceDate(o.origDate,{weekday:'short',day:'numeric',month:'short'})}`:''}</p>
@@ -551,14 +559,16 @@ function openOccurrence(key){
   ${lv?`<div class="done-box"><div><span class="muted">Work done</span><span>${esc((lv.tasks||[]).join(', ')||'Main job')}</span></div>
     <div><span class="muted">Time on site</span><span>${esc(time)}</span></div>
     ${lv.notes?`<div><span class="muted">Visit notes</span><span>${esc(lv.notes)}</span></div>`:''}
-    <div><span class="muted">Invoice</span><span>${lv.invoiced?(inv?`<button class="linkbtn" data-action="open-invoice" data-id="${esc(inv.id)}">${esc(inv.number)}</button>${inv.status==='paid'?' (paid)':''}`:'Invoiced'):'Not invoiced yet'}</span></div></div>`:''}
-  ${o.status!=='skipped'?jobChargeHtml(o):''}
+    ${lv.loggedBy?`<div><span class="muted">Logged by</span><span>${esc(lv.loggedBy)}</span></div>`:''}
+    ${S.crew?'':`<div><span class="muted">Invoice</span><span>${lv.invoiced?(inv?`<button class="linkbtn" data-action="open-invoice" data-id="${esc(inv.id)}">${esc(inv.number)}</button>${inv.status==='paid'?' (paid)':''}`:'Invoiced'):'Not invoiced yet'}</span></div>`}</div>`:''}
+  ${o.status!=='skipped'&&!S.crew?jobChargeHtml(o):''}
+  ${S.crew&&(o.items||[]).length?`<p><span class="muted">Also on this job:</span> ${esc(o.items.map(m=>`${m.name}${Number(m.qty)!==1?` × ${fmtNum(m.qty)}`:''}`).join(', '))}</p>`:''}
   ${o.partOf?`<p><span class="muted">This visit is for:</span> ${esc(o.task||'Main job')}</p>`:''}
   ${partList.length?`<p><span class="muted">This job:</span> ${partList.map(x=>`<button class="linkbtn" data-action="open-occ" data-key="${esc(x.k)}">${esc(x.label)} ${shortDate(x.date)}</button>`).join(', ')}</p>`:''}
   ${o.notes?`<p><span class="muted">Visit note:</span> ${esc(o.notes)}</p>`:''}
 
   ${c.notes?`<p><span class="muted">Customer notes:</span> ${esc(c.notes)}</p>`:''}
-  </div><div class="actions">${act}<button class="btn" data-action="edit-customer" data-id="${esc(o.customerId)}">Customer details</button></div>`);
+  </div><div class="actions">${act}${S.crew?'':`<button class="btn" data-action="edit-customer" data-id="${esc(o.customerId)}">Customer details</button>`}</div>`);
 }
 function jobParts(key){return S.schedule.filter(e=>e.kind==='extra'&&e.partOf===key).sort((a,b)=>(a.part||0)-(b.part||0)||a.date.localeCompare(b.date));}
 function jobDate(key){if(!key)return '';if(key.startsWith('r:'))return key.split(':')[2];const e=S.schedule.find(x=>x.id===key.slice(2));return e?e.date:'';}
@@ -658,6 +668,65 @@ function updateApptSum(form){
   el.innerHTML=`${main.warn?`<div class="warnbox">${esc(main.warn)}</div>`:''}<div class="totals charge"><div class="sub-h"><span>This visit</span></div>${main.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}
     ${parts.map(p=>`<div class="sub-h"><span>${esc(p.label)}</span></div>${p.ch.rows.map(r=>`<div><span>${esc(r[0])}</span><span>${gbp(r[1])}</span></div>`).join('')}`).join('')}
     <div class="grand"><span>Job total</span><span>${gbp(total)}</span></div></div>`;
+}
+function openCrewTime(key,vid){
+  const o=findOcc(key);if(!o)return;const v=vid?S.visits.find(x=>x.id===vid):null;
+  const start=v?v.start||'':o.start||'',mins=v?Number(v.minutes)||0:o.duration;
+  openSheet(`<form id="crewForm" data-key="${esc(key)}" data-vid="${esc(vid||'')}">${head(v?'Change your time':'Log your time')}
+  <p class="muted">${esc(S.customers[o.customerId]?.name||'')}, ${niceDate(v?v.date:o.date,{weekday:'long',day:'numeric',month:'long'})}</p>
+  ${quickDur('How long?')}
+  <div class="row2"><label class="f">Start<input type="time" name="start" value="${esc(start)}"></label><label class="f">Finish<input type="time" name="end" value="${esc(start&&mins?addMins(start,mins):'')}"></label></div>
+  ${hmBox('minutes',mins,'Time on site','fills in from start and finish')}
+  ${v?'':`<fieldset class="f"><legend>Anything extra used? <span class="hint">e.g. compost bags; leave empty if none</span></legend><div id="matRows">${(o.items||[]).map(matRow).join('')}</div>
+  <div class="actions" style="margin-top:10px"><button type="button" class="btn small" data-action="add-mat">+ Add item</button></div></fieldset>`}
+  <label class="f">Notes for the office<textarea name="notes" rows="2">${esc(v?v.notes||'':'')}</textarea></label>
+  <div class="actions"><button class="btn primary" type="submit">${v?'Save time':'✓ Mark as done'}</button></div></form>`);
+}
+async function saveCrewTime(form){
+  const o=findOcc(form.dataset.key);if(!o)return;const fd=new FormData(form),vid=form.dataset.vid;
+  const minutes=readDur(form,'minutes');if(!minutes)return toast('Add how long you were there.');
+  const start=fd.get('start')||'',end=fd.get('end')||'',notes=(fd.get('notes')||'').trim();
+  if(vid)return persist(form,async()=>{const{error}=await SB.rpc('crew_update_visit',{p_id:vid,p:{start,end,minutes,notes}});if(error)throw error;await store.refresh();},'Time updated');
+  if(o.date>todayStr())return toast('That visit is still to come.');
+  const items=[...form.querySelectorAll('#matRows .mat-row')].map(r=>({name:r.querySelector('[name=mname]').value.trim(),qty:parseFloat(r.querySelector('[name=mqty]').value)||1})).filter(m=>m.name);
+  await persist(form,()=>store.put('visits',newId(),{...makeVisit(o,{date:o.date,start,duration:minutes,items,notes}),end}),`Marked as done: ${fmtMins(minutes)}`);
+}
+function makeCrewStore(sb){
+  let h=null,busy=null;
+  async function load(){if(busy)return busy;busy=(async()=>{const{data,error}=await sb.rpc('crew_data');if(error)throw error;
+      h.customers(data.customers||[]);h.schedule(data.schedule||[]);h.visits(data.visits||[]);})();try{await busy;}finally{busy=null;}}
+  return{kind:'crew',refresh:load,
+    async watch(handlers,onErr){h=handlers;try{await load();}catch(e){onErr&&onErr(e);}
+      const wake=()=>{if(document.visibilityState==='visible')load().catch(()=>{});};
+      document.addEventListener('visibilitychange',wake);window.addEventListener('online',wake);setInterval(wake,120000);},
+    async put(k,id,o){if(k!=='visits')throw new Error('not allowed');
+      const{error}=await sb.rpc('crew_log_visit',{p:{customerId:o.customerId,date:o.date,start:o.start,end:o.end,minutes:o.minutes,tasks:o.tasks,notes:o.notes,scheduledKey:o.scheduledKey,partOf:o.partOf,materials:(o.materials||[]).map(m=>({name:m.name,qty:m.qty}))}});
+      if(error)throw error;await load();},
+    async remove(){throw new Error('not allowed');},async putSettings(){throw new Error('not allowed');}};
+}
+function startCrew(ctx){
+  S.crew=ctx;document.body.classList.add('crew');S.tab='schedule';S.invoices=[];
+  S.settings={...defaultSettings(),businessName:ctx.businessName||'',logo:ctx.logo||null,tasks:ctx.tasks||[],timer:null};
+  store=makeCrewStore(SB);const got={c:false,v:false};
+  const ready=()=>{if(got.c&&got.v)S.ready=true;render();};
+  render(true);
+  store.watch({customers:list=>{const m={};for(const c of list)m[c.id]=c;S.customers=m;got.c=true;ready();},
+    visits:list=>{S.visits=list;got.v=true;ready();},schedule:list=>{S.schedule=list;render();}},
+    ()=>toast('Couldn’t load the round. Check your signal and reopen the app.'));
+}
+/* ---------- team (owner side) ---------- */
+async function loadTeam(){
+  const box=$('#teamList');if(!box||S.crew)return;
+  const{data,error}=await SB.from('team_members').select('email,name').order('created_at');
+  if(!$('#teamList'))return;
+  if(error){box.innerHTML='<p class="muted">Couldn’t load your team.</p>';return;}
+  box.innerHTML=data.length?data.map(m=>`<div class="team-row"><span><strong>${esc(m.name||m.email)}</strong><br><span class="muted">${esc(m.email)}</span></span><button type="button" class="btn small warn" data-action="team-remove" data-email="${esc(m.email)}">Remove</button></div>`).join('')
+    :'<p class="muted">No gardeners yet.</p>';
+}
+async function teamCall(body){
+  const{data,error}=await SB.functions.invoke('team-member',{body});
+  if(error){let msg='That didn’t work. Try again.';try{const j=await error.context.json();if(j&&j.error)msg=j.error;}catch(e){}throw new Error(msg);}
+  return data;
 }
 function makeVisit(o,f){const c=S.customers[o.customerId]||{};
   return{customerId:o.customerId,date:f.date,start:f.start||'',end:f.start?addMins(f.start,f.duration):'',minutes:f.duration,tasks:o.task?[o.task]:(c.tasks||[]).slice(),materials:f.items||[],
@@ -903,6 +972,11 @@ function viewSettings(){
   <div class="actions"><button class="btn primary" type="submit">Save settings</button></div></form>
   <section class="section"><h2>Your records</h2><p class="muted">${S.visits.length} visit${S.visits.length===1?'':'s'} and ${Object.keys(S.customers).length} customer${Object.keys(S.customers).length===1?'':'s'}. Export a spreadsheet copy now and then as a backup, or to hand to your accountant.</p>
   <div class="actions"><button class="btn" data-action="export">Export visits as CSV</button></div></section>
+  <section class="section"><h2>Team</h2><p class="muted">Gardeners you add here sign in with their own email. They see the round, addresses and jobs, and can mark visits done and log their time. They can’t see prices, rates, invoices or customer settings.</p>
+  <div id="teamList"><p class="muted">Loading…</p></div>
+  <div class="row2"><label class="f">Name<input id="tmName" autocomplete="off"></label><label class="f">Email<input id="tmEmail" type="email" autocomplete="off"></label></div>
+  <div class="actions"><button type="button" class="btn" data-action="team-add">Add gardener</button></div>
+  <p class="muted" style="margin-top:8px">They sign in at <strong>${esc(location.origin+location.pathname)}</strong></p></section>
   <section class="section"><h2>Your account</h2><p class="muted">Signed in as ${esc(S.userEmail||'')}.</p><div class="actions"><button class="btn warn" data-action="sign-out">Sign out</button></div></section>`;
 }
 /* ---------- invoices and PDF ---------- */
@@ -1531,6 +1605,10 @@ document.addEventListener('click',async e=>{
       if(v.invoiced){toast('This visit is on an invoice. Remove it from the invoice first.');break;}
       if(!armed(a,'Tap again to undo'))break;
       try{await store.remove('visits',id);closeSheet();toast('Visit set back to not done');}catch(err){toast('That didn’t save. Try again.');}break;}
+    case 'crew-time':openCrewTime(a.dataset.key,a.dataset.vid||'');break;
+    case 'team-add':{const em=($('#tmEmail').value||'').trim(),nm=($('#tmName').value||'').trim();if(!em)return toast('Add their email first.');
+      a.disabled=true;try{await teamCall({action:'add',email:em,name:nm});$('#tmEmail').value='';$('#tmName').value='';toast(`${nm||em} added. They can sign in now.`);loadTeam();}catch(err){toast(err.message);}finally{a.disabled=false;}break;}
+    case 'team-remove':{if(!armed(a,'Tap again to remove'))break;try{await teamCall({action:'remove',email:a.dataset.email});toast('Removed. They can no longer see your round.');loadTeam();}catch(err){toast(err.message);}break;}
     case 'quick-done':{const o=findOcc(a.dataset.key);if(!o)break;
       if(o.date>todayStr()){toast('That visit is still to come. Use Edit or reschedule to change the date first.');break;}
       a.disabled=true;
@@ -1601,6 +1679,7 @@ document.addEventListener('input',e=>{
   if(f&&['start','end'].includes(e.target.name)||e.target.dataset&&e.target.dataset.hm)f&&f.querySelectorAll('[data-action=dur][aria-pressed=true]').forEach(x=>x.setAttribute('aria-pressed','false'));
   if(f&&f.id==='visitForm')updateVisitCalc(f,e.target);
   if(f&&f.id==='apptForm'){timeLink(f,e.target,'duration');updateApptSum(f);}
+  if(f&&f.id==='crewForm')timeLink(f,e.target,'minutes');
   if(f&&f.id==='custForm'&&e.target.name==='pricing')f.dataset.pr=e.target.value;
   if(e.target.id==='custSearch')$('#custList').innerHTML=custListHtml(e.target.value);
 });
@@ -1609,6 +1688,7 @@ document.addEventListener('submit',async e=>{
   if(f.id==='visitForm')saveVisit(f);
   else if(f.id==='custForm')saveCustomer(f);
   else if(f.id==='apptForm')saveAppt(f);
+  else if(f.id==='crewForm')saveCrewTime(f);
   else if(f.id==='payForm')savePayment(f);
   else if(f.id==='settingsForm'){
     const fd=new FormData(f);
@@ -1658,6 +1738,7 @@ async function startApp(session){
   if(started)return;started=true;
   document.body.classList.remove('signed-out');
   const uid=session.user.id;S.userEmail=session.user.email;
+  try{const{data:ctx}=await SB.rpc('crew_context');if(ctx&&ctx.role==='gardener')return startCrew(ctx);}catch(e){}
   try{const n=await claimImport(uid);if(n)toast('Your customers and settings have been moved across');}catch(e){toast('Couldn’t move your old records across yet. Reload to try again.');}
   store=makeSupabaseStore(SB,uid);
   const got={c:false,v:false};
